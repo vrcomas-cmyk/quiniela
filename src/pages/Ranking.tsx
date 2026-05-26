@@ -23,6 +23,7 @@ export function Ranking() {
     if (i === 1) return '🥈';
     if (i === 2) return '🥉';
     if (i === 3) return '🏅';
+    if (i === 4) return '🎖';
     return '';
   };
 
@@ -31,7 +32,7 @@ export function Ranking() {
       <div className="card p-6 bg-gradient-to-r from-pitch-700 to-pitch-900 text-white">
         <h2 className="font-display text-3xl">RANKING GENERAL</h2>
         <p className="text-pitch-100 text-sm mt-1">
-          Premios: 1° 40% · 2° 30% · 3° 20% · 4° 10% del bote total
+          Premios: 1° 35% · 2° 25% · 3° 20% · 4° 15% · 5° 5% del bote total
         </p>
       </div>
 

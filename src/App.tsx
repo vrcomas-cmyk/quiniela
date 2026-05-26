@@ -3,6 +3,7 @@ import { AuthProvider } from './hooks/AuthContext';
 import { ProtectedRoute } from './components/ProtectedRoute';
 import { Layout } from './components/Layout';
 import { Login } from './pages/Login';
+import { Invite } from './pages/Invite';
 import { Home } from './pages/Home';
 import { MisPronosticos } from './pages/MisPronosticos';
 import { Clasificacion } from './pages/Clasificacion';
@@ -16,6 +17,7 @@ export function App() {
       <BrowserRouter>
         <Routes>
           <Route path="/login" element={<Login />} />
+          <Route path="/invite" element={<Invite />} />
           <Route
             element={
               <ProtectedRoute>

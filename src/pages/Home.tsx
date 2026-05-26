@@ -3,11 +3,16 @@ import { Link } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { Fase } from '../types';
 import { Countdown } from '../components/Countdown';
+import { Markdown } from '../components/Markdown';
 import { useAuthCtx } from '../hooks/AuthContext';
+import { useConfig } from '../hooks/useConfig';
 import { fmtFecha, estaAbierto, estaCerrado, antesDeAbrir } from '../lib/fechas';
 
 export function Home() {
   const { profile } = useAuthCtx();
+  const { valor: reglas } = useConfig('reglas_puntuacion');
+  const { valor: bienvenida } = useConfig('texto_bienvenida');
+  const { valor: premios } = useConfig('texto_premios');
   const [fases, setFases] = useState<Fase[]>([]);
   const [misPuntos, setMisPuntos] = useState<number | null>(null);
   const [miPosicion, setMiPosicion] = useState<number | null>(null);
@@ -34,17 +39,13 @@ export function Home() {
 
   return (
     <div className="space-y-6">
-      {/* Hero / saludo */}
       <div className="card p-6 bg-gradient-to-br from-pitch-700 to-pitch-900 text-white relative overflow-hidden">
         <div className="absolute -right-10 -top-10 text-[200px] opacity-10">⚽</div>
         <div className="relative">
           <h2 className="font-display text-3xl tracking-wider">
             ¡HOLA, {profile?.nombre_completo.split(' ')[0].toUpperCase()}!
           </h2>
-          <p className="text-pitch-100 mt-2 max-w-2xl">
-            Tus pronósticos te esperan. Acumula puntos en cada fase, conserva tu lugar en el ranking,
-            y al final del torneo presume que lo viste venir.
-          </p>
+          <p className="text-pitch-100 mt-2 max-w-2xl">{bienvenida}</p>
           <div className="grid grid-cols-3 gap-4 mt-6 max-w-md">
             <div>
               <div className="text-3xl font-display text-fire-400">{misPuntos ?? 0}</div>
@@ -61,10 +62,12 @@ export function Home() {
               <div className="text-xs text-pitch-100 uppercase tracking-widest">Jugadores</div>
             </div>
           </div>
+          <div className="mt-4 text-xs text-pitch-100">
+            <Markdown text={premios} />
+          </div>
         </div>
       </div>
 
-      {/* Fases */}
       <div>
         <h3 className="font-display text-2xl text-ink-900 mb-3">FASES DEL TORNEO</h3>
         <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -104,34 +107,9 @@ export function Home() {
         </div>
       </div>
 
-      {/* Reglas resumen */}
       <div className="card p-6">
-        <h3 className="font-display text-2xl text-ink-900 mb-3">CÓMO SE GANAN PUNTOS</h3>
-        <div className="grid sm:grid-cols-2 gap-4 text-sm">
-          <div>
-            <b className="text-pitch-700">Fase de Grupos</b>
-            <ul className="mt-1 space-y-1 text-ink-700">
-              <li>• Marcador exacto: <b>4 puntos</b></li>
-              <li>• Acierto a ganador/empate: <b>2 puntos</b></li>
-              <li>• 1° y 2° de cada grupo (posición exacta): <b>4 pts</b>; sin posición: <b>2 pts</b></li>
-              <li>• 8 mejores terceros (sin importar grupo): <b>2 pts</b> c/u</li>
-            </ul>
-          </div>
-          <div>
-            <b className="text-pitch-700">Eliminatorias (16vos → Semifinales)</b>
-            <ul className="mt-1 space-y-1 text-ink-700">
-              <li>• Marcador exacto: <b>6 puntos</b></li>
-              <li>• Acierto a ganador/empate: <b>3 puntos</b></li>
-            </ul>
-            <b className="text-pitch-700 mt-3 block">Final + Top 4</b>
-            <ul className="mt-1 space-y-1 text-ink-700">
-              <li>• Campeón (posición exacta): <b>8 pts</b></li>
-              <li>• 2°, 3°, 4° (posición exacta): <b>5 pts</b> c/u</li>
-              <li>• Equipo en top 4, posición errada: <b>3 pts</b></li>
-              <li>• <b>Bono</b> 4 finalistas en orden exacto: <b>+5 pts</b></li>
-            </ul>
-          </div>
-        </div>
+        <h3 className="font-display text-2xl text-ink-900 mb-3">CÓMO SE GANAN LOS PUNTOS</h3>
+        <Markdown text={reglas} className="text-sm text-ink-700" />
       </div>
     </div>
   );
