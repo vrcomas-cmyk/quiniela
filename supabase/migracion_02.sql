@@ -5,6 +5,10 @@
 -- Es seguro re-ejecutar (todo con IF NOT EXISTS / drop-and-create)
 -- =============================================================================
 
+-- Extensiones necesarias
+create extension if not exists "uuid-ossp";
+create extension if not exists pgcrypto;
+
 -- =============================================================================
 -- 1. TABLA: configuracion (clave/valor para textos editables)
 -- =============================================================================

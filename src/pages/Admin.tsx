@@ -5,8 +5,9 @@ import { fmtFecha, fmtFechaCorta } from '../lib/fechas';
 import { invitarUsuario, invitarMasivo, eliminarUsuario, InvitacionMasivaItem } from '../lib/adminApi';
 import { setConfig } from '../hooks/useConfig';
 import { Markdown } from '../components/Markdown';
+import { calcularReparto, fmtPesos, JugadorPuntos, ReporteReparto } from '../lib/premios';
 
-type Seccion = 'fases' | 'partidos' | 'resultados' | 'clasificacion_oficial' | 'usuarios' | 'invitaciones' | 'configuracion';
+type Seccion = 'fases' | 'partidos' | 'resultados' | 'clasificacion_oficial' | 'usuarios' | 'invitaciones' | 'configuracion' | 'premios';
 
 export function Admin() {
   const [seccion, setSeccion] = useState<Seccion>('fases');
@@ -28,6 +29,7 @@ export function Admin() {
           ['clasificacion_oficial', '🏆 Clasif. oficial'],
           ['invitaciones', '✉ Invitaciones'],
           ['usuarios', '👥 Usuarios'],
+          ['premios', '💰 Premios'],
           ['configuracion', '⚙ Configuración'],
         ] as [Seccion, string][]).map(([k, label]) => (
           <button
@@ -46,6 +48,7 @@ export function Admin() {
       {seccion === 'clasificacion_oficial' && <AdminClasificacionOficial />}
       {seccion === 'invitaciones' && <AdminInvitaciones />}
       {seccion === 'usuarios' && <AdminUsuarios />}
+      {seccion === 'premios' && <AdminPremios />}
       {seccion === 'configuracion' && <AdminConfiguracion />}
     </div>
   );
@@ -1220,6 +1223,215 @@ function AdminConfiguracion() {
           )}
         </div>
       ))}
+    </div>
+  );
+}
+
+// ============================================================================
+// ADMIN: PREMIOS (calculadora de reparto según reglas oficiales)
+// ============================================================================
+
+function AdminPremios() {
+  const [jugadores, setJugadores] = useState<JugadorPuntos[]>([]);
+  const [participantesPagados, setParticipantesPagados] = useState(0);
+  const [participantesTotal, setParticipantesTotal] = useState(0);
+  const [pagoPorPersona, setPagoPorPersona] = useState(400);
+  const [aporteFijo, setAporteFijo] = useState(1500);
+  const [usarSoloPagados, setUsarSoloPagados] = useState(true);
+  const [reporte, setReporte] = useState<ReporteReparto | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  const cargar = async () => {
+    setLoading(true);
+    // Ranking actual
+    const { data: ranking } = await supabase
+      .from('ranking')
+      .select('user_id, nombre_completo, puntos_totales');
+    setJugadores((ranking ?? []) as JugadorPuntos[]);
+
+    // Conteo de profiles
+    const { count: totalCount } = await supabase
+      .from('profiles')
+      .select('id', { count: 'exact', head: true })
+      .eq('rol', 'jugador');
+    const { count: pagadosCount } = await supabase
+      .from('profiles')
+      .select('id', { count: 'exact', head: true })
+      .eq('rol', 'jugador')
+      .eq('pagado', true);
+    setParticipantesTotal(totalCount ?? 0);
+    setParticipantesPagados(pagadosCount ?? 0);
+    setLoading(false);
+  };
+  useEffect(() => { cargar(); }, []);
+
+  const recalcular = () => {
+    const n = usarSoloPagados ? participantesPagados : participantesTotal;
+    const monto = n * pagoPorPersona;
+    const r = calcularReparto(jugadores, monto, aporteFijo);
+    setReporte(r);
+  };
+
+  const exportarCSV = () => {
+    if (!reporte) return;
+    const filas = [
+      ['Posicion', 'Etiqueta', 'Nombre', 'Puntos', 'Porcentaje', 'Monto'],
+      ...reporte.asignaciones.map(a => [
+        String(a.posicion),
+        a.posicion_label,
+        a.nombre_completo,
+        String(a.puntos),
+        `${a.porcentaje.toFixed(4)}%`,
+        a.monto.toFixed(2),
+      ]),
+    ];
+    const csv = filas.map(f => f.map(c => `"${c.replace(/"/g, '""')}"`).join(',')).join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `reparto-premios-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="card p-4">
+        <h3 className="font-display text-xl mb-2">💰 Calculadora de premios</h3>
+        <p className="text-xs text-ink-700 mb-3">
+          Calcula el reparto del bote aplicando las reglas oficiales del DOCX (con manejo automático de empates).
+          Usa el ranking actual; corre esto al final del torneo.
+        </p>
+
+        {loading ? <div className="text-pitch-700">Cargando…</div> : (
+          <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-3">
+            <div>
+              <label className="label">Participantes pagados</label>
+              <input type="number" className="input" value={participantesPagados}
+                onChange={e => setParticipantesPagados(parseInt(e.target.value, 10) || 0)} />
+              <div className="text-[10px] text-ink-700/60 mt-1">
+                Total registrados: {participantesTotal}
+              </div>
+            </div>
+            <div>
+              <label className="label">Pago por persona ($)</label>
+              <input type="number" className="input" value={pagoPorPersona}
+                onChange={e => setPagoPorPersona(parseInt(e.target.value, 10) || 0)} />
+            </div>
+            <div>
+              <label className="label">Aporte fijo desarrollador ($)</label>
+              <input type="number" className="input" value={aporteFijo}
+                onChange={e => setAporteFijo(parseInt(e.target.value, 10) || 0)} />
+              <div className="text-[10px] text-ink-700/60 mt-1">
+                Se descuenta del total antes de repartir.
+              </div>
+            </div>
+            <div className="flex flex-col justify-end">
+              <label className="flex items-center gap-2 text-sm mb-2">
+                <input type="checkbox" checked={usarSoloPagados}
+                  onChange={e => setUsarSoloPagados(e.target.checked)} />
+                Solo contar pagados
+              </label>
+              <button className="btn-accent" onClick={recalcular}>
+                Calcular reparto
+              </button>
+            </div>
+          </div>
+        )}
+
+        <div className="mt-3 text-sm text-ink-700">
+          <div>Monto bruto: <b>{fmtPesos((usarSoloPagados ? participantesPagados : participantesTotal) * pagoPorPersona)}</b></div>
+          <div>Aporte fijo: −{fmtPesos(aporteFijo)}</div>
+          <div>Monto neto a repartir: <b className="text-pitch-700">
+            {fmtPesos(Math.max(0, (usarSoloPagados ? participantesPagados : participantesTotal) * pagoPorPersona - aporteFijo))}
+          </b></div>
+        </div>
+      </div>
+
+      {reporte && (
+        <>
+          <div className="card overflow-x-auto">
+            <div className="flex flex-wrap items-center justify-between gap-2 p-3 border-b border-pitch-100">
+              <h4 className="font-display text-lg">Reparto calculado</h4>
+              <button className="btn-ghost text-xs" onClick={exportarCSV}>📥 Exportar a CSV</button>
+            </div>
+            <table className="w-full text-sm">
+              <thead className="bg-pitch-50 text-pitch-700">
+                <tr>
+                  <th className="text-left px-3 py-2">Lugar</th>
+                  <th className="text-left px-3 py-2">Jugador</th>
+                  <th className="text-right px-3 py-2">Puntos</th>
+                  <th className="text-right px-3 py-2">%</th>
+                  <th className="text-right px-3 py-2">Monto</th>
+                </tr>
+              </thead>
+              <tbody>
+                {reporte.asignaciones.map((a, i) => (
+                  <tr key={i} className="border-t border-pitch-100">
+                    <td className="px-3 py-2 font-display">{a.posicion_label}</td>
+                    <td className="px-3 py-2 font-semibold">{a.nombre_completo}</td>
+                    <td className="px-3 py-2 text-right font-mono">{a.puntos}</td>
+                    <td className="px-3 py-2 text-right font-mono">{a.porcentaje.toFixed(2)}%</td>
+                    <td className="px-3 py-2 text-right font-mono font-bold text-pitch-700">{fmtPesos(a.monto)}</td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot className="bg-pitch-50">
+                <tr>
+                  <td colSpan={3} className="px-3 py-2 text-right font-semibold">TOTAL repartido:</td>
+                  <td className="px-3 py-2 text-right font-mono">
+                    {reporte.asignaciones.reduce((s, a) => s + a.porcentaje, 0).toFixed(2)}%
+                  </td>
+                  <td className="px-3 py-2 text-right font-mono font-bold">
+                    {fmtPesos(reporte.asignaciones.reduce((s, a) => s + a.monto, 0))}
+                  </td>
+                </tr>
+                {reporte.porcentaje_residual > 0.01 && (
+                  <tr>
+                    <td colSpan={3} className="px-3 py-2 text-right text-amber-700">Residual (no asignado):</td>
+                    <td className="px-3 py-2 text-right font-mono text-amber-700">
+                      {reporte.porcentaje_residual.toFixed(2)}%
+                    </td>
+                    <td className="px-3 py-2 text-right font-mono font-bold text-amber-700">
+                      {fmtPesos(reporte.monto_residual)}
+                    </td>
+                  </tr>
+                )}
+              </tfoot>
+            </table>
+          </div>
+
+          {reporte.desiertos.length > 0 && (
+            <div className="card p-3 bg-amber-50 border-amber-200 text-sm">
+              <b>Lugares desiertos:</b> {reporte.desiertos.map(d => `${d}°`).join(', ')}
+            </div>
+          )}
+
+          {reporte.reglas_aplicadas.length > 0 && (
+            <div className="card p-4">
+              <h4 className="font-semibold text-pitch-700 mb-2">Auditoría: reglas aplicadas</h4>
+              <ul className="text-sm text-ink-700 space-y-1">
+                {reporte.reglas_aplicadas.map((r, i) => (
+                  <li key={i}>• {r}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          <div className="card p-4 text-xs text-ink-700">
+            <b>Referencia de reglas oficiales (DOCX):</b>
+            <ul className="mt-2 space-y-1">
+              <li><b>Sin empates:</b> 1° 35%, 2° 25%, 3° 20%, 4° 15%, 5° 5%</li>
+              <li><b>R1 (≥3 empatados en 1°):</b> 80% para 1°, 20% para el siguiente, 4° y 5° desiertos.</li>
+              <li><b>R2 (1°≤2 ganadores y &gt;2 empatados en 2°):</b> 1° comparte 60%, 2° comparte 40%, 4° y 5° desiertos.</li>
+              <li><b>R3 (empate en 3°):</b> comparten 40% (20+15+5), 4° y 5° desiertos.</li>
+              <li><b>R4 (empate en 4°):</b> comparten 20% (15+5), 5° desierto.</li>
+              <li><b>R5 (empate en 5°):</b> comparten el 5%.</li>
+            </ul>
+          </div>
+        </>
+      )}
     </div>
   );
 }
