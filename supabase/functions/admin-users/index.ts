@@ -233,10 +233,43 @@ async function crearInvitacion(
 
   if (insErr) return { ok: false, error: insErr.message };
 
-  const origin = req.headers.get('origin') ?? '';
-  return {
-    ok: true,
-    token,
-    link: `${origin}/invite?token=${token}`,
-  };
+  const origin = req.headers.get('origin') ?? (Deno.env.get('URL_APP') ?? '');
+  const link = `${origin}/invite?token=${token}`;
+
+  // Encolar correo de invitación (se enviará cuando corra procesar-correos)
+  try {
+    await adminClient.from('correos_cola').insert({
+      destinatario: email,
+      nombre_destinatario: nombre_completo.trim(),
+      asunto: '🎉 Te invitaron a la Quiniela Mundial 2026 (DEGASA)',
+      cuerpo_html: plantillaInvitacion(nombre_completo.trim(), link),
+      tipo: 'invitacion',
+    });
+  } catch (_e) {
+    // Si falla el encolado, igual devolvemos el link para copiar manual
+  }
+
+  return { ok: true, token, link };
+}
+
+function plantillaInvitacion(nombre: string, link: string): string {
+  return `
+  <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+    <div style="background: linear-gradient(135deg, #0a5526, #053018); padding: 24px; text-align: center;">
+      <h1 style="color: #fff; margin: 0; font-size: 24px;">⚽ Quiniela Mundial 2026</h1>
+      <p style="color: #dcf0de; margin: 8px 0 0;">México · USA · Canadá</p>
+    </div>
+    <div style="padding: 24px; background: #f0f9f1;">
+      <p style="font-size: 16px;">Hola <b>${nombre}</b>,</p>
+      <p style="font-size: 16px;">Te invitamos a participar en la Quiniela Mundialista de DEGASA. Activa tu cuenta y empieza a pronosticar:</p>
+      <div style="text-align: center; margin: 24px 0;">
+        <a href="${link}" style="background: #f97316; color: #fff; padding: 14px 36px; border-radius: 8px; text-decoration: none; font-weight: bold; font-size: 16px;">
+          Activar mi cuenta
+        </a>
+      </div>
+      <p style="font-size: 13px; color: #666;">Si el botón no funciona, copia y pega este enlace en tu navegador:</p>
+      <p style="font-size: 12px; color: #0a5526; word-break: break-all;">${link}</p>
+      <p style="font-size: 12px; color: #999; margin-top: 24px;">Esta invitación expira en 30 días.</p>
+    </div>
+  </div>`;
 }

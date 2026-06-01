@@ -13,8 +13,11 @@ vía trigger, y pueblan el ranking correctamente.
 |--------|----------|
 | `datos_prueba.sql` | Crea 100 usuarios de prueba con pronósticos aleatorios |
 | `simular_resultados.sql` | Carga resultados oficiales aleatorios y recalcula puntos |
+| `datos_prueba_eliminatorias.sql` | Genera partidos y pronósticos de 16vos → final |
+| `simular_resultados_eliminatorias.sql` | Carga resultados de eliminatorias y recalcula |
 | `forzar_empates.sql` | Fuerza escenarios de empate para probar la calculadora de premios |
-| `limpiar_datos_prueba.sql` | Borra TODOS los datos de prueba |
+| `limpiar_eliminatorias_prueba.sql` | Borra solo los partidos de prueba de eliminatorias |
+| `limpiar_datos_prueba.sql` | Borra TODOS los datos de prueba (usuarios y todo) |
 
 ## Orden de ejecución
 
@@ -57,6 +60,43 @@ Ahora puedes navegar la app:
 - **Ranking**: verás los 100 usuarios ordenados
 - **Comunidad**: con los partidos cerrados, verás la matriz de pronósticos
 - **Admin → Premios**: calcula el reparto del bote
+
+### 2b. Generar y probar las fases eliminatorias
+
+En el Mundial real, los partidos de 16vos en adelante se crean conforme avanza el
+torneo (no se conocen los cruces de antemano). Para **probar** que todas las fases
+funcionan, hay un par de scripts que las generan con equipos aleatorios:
+
+```
+Ejecutar: datos_prueba_eliminatorias.sql
+```
+
+Esto crea los partidos de prueba de las 6 fases eliminatorias (16 + 8 + 4 + 2 + 1 + 1
+= 32 partidos), publica esas fases, abre la ventana de pronósticos, y genera los
+pronósticos de los 100 usuarios. Los partidos se marcan con sede `(PRUEBA)` para
+poder borrarlos después sin tocar nada real.
+
+```
+Ejecutar: simular_resultados_eliminatorias.sql
+```
+
+Carga marcadores oficiales aleatorios para esos partidos. El trigger recalcula con
+la puntuación correcta de cada fase (6/3 en rondas, 8/4 en la final). Al final
+muestra el desglose por fase del top 10, igual que el archivo de Qatar:
+`grupos | r16vos | octavos | cuartos | semis | finales | total`.
+
+Con esto puedes navegar **Mis Pronósticos** seleccionando cada fase, ver la
+**Comunidad** de cada ronda, y confirmar que el ranking suma todo correctamente.
+
+Para borrar SOLO las eliminatorias de prueba (dejando intacta la fase de grupos):
+
+```
+Ejecutar: limpiar_eliminatorias_prueba.sql
+```
+
+Esto borra los 32 partidos de prueba (y sus pronósticos en cascada) y revierte las
+fases eliminatorias a "no publicada" sin fechas, como recién instaladas. **Verificado:**
+no toca los 72 partidos de grupos ni sus 7,200 pronósticos.
 
 ### 3. (Opcional) Probar la calculadora de premios con empates
 

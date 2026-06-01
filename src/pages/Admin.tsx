@@ -2,12 +2,13 @@ import { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { Fase, Grupo, Partido, Profile } from '../types';
 import { fmtFecha, fmtFechaCorta } from '../lib/fechas';
-import { invitarUsuario, invitarMasivo, eliminarUsuario, InvitacionMasivaItem } from '../lib/adminApi';
+import { invitarUsuario, invitarMasivo, eliminarUsuario, procesarCorreosAhora, InvitacionMasivaItem } from '../lib/adminApi';
 import { setConfig } from '../hooks/useConfig';
 import { Markdown } from '../components/Markdown';
 import { calcularReparto, fmtPesos, JugadorPuntos, ReporteReparto } from '../lib/premios';
+import { exportarQuinielaExcel } from '../lib/exportarExcel';
 
-type Seccion = 'fases' | 'partidos' | 'resultados' | 'clasificacion_oficial' | 'usuarios' | 'invitaciones' | 'configuracion' | 'premios';
+type Seccion = 'fases' | 'partidos' | 'resultados' | 'clasificacion_oficial' | 'usuarios' | 'invitaciones' | 'pagos' | 'reporte' | 'premios' | 'configuracion';
 
 export function Admin() {
   const [seccion, setSeccion] = useState<Seccion>('fases');
@@ -29,6 +30,8 @@ export function Admin() {
           ['clasificacion_oficial', '🏆 Clasif. oficial'],
           ['invitaciones', '✉ Invitaciones'],
           ['usuarios', '👥 Usuarios'],
+          ['pagos', '💵 Pagos'],
+          ['reporte', '📊 Reporte'],
           ['premios', '💰 Premios'],
           ['configuracion', '⚙ Configuración'],
         ] as [Seccion, string][]).map(([k, label]) => (
@@ -48,6 +51,8 @@ export function Admin() {
       {seccion === 'clasificacion_oficial' && <AdminClasificacionOficial />}
       {seccion === 'invitaciones' && <AdminInvitaciones />}
       {seccion === 'usuarios' && <AdminUsuarios />}
+      {seccion === 'pagos' && <AdminPagos />}
+      {seccion === 'reporte' && <AdminReporte />}
       {seccion === 'premios' && <AdminPremios />}
       {seccion === 'configuracion' && <AdminConfiguracion />}
     </div>
@@ -141,6 +146,17 @@ function AdminFases() {
                   value={valCi}
                   onChange={(ev) => setEditing(s => ({ ...s, [f.id]: { ...s[f.id], fecha_cierre: ev.target.value as any } }))}
                 />
+              </div>
+              <div>
+                <label className="label">Publicar auto. (horas antes de apertura)</label>
+                <input type="number" min={0} className="input"
+                  placeholder="ej. 12"
+                  value={(e.publicar_horas_antes ?? f.publicar_horas_antes ?? '') as any}
+                  onChange={(ev) => setEditing(s => ({ ...s, [f.id]: { ...s[f.id], publicar_horas_antes: ev.target.value === '' ? null : parseInt(ev.target.value, 10) } }))}
+                />
+                <div className="text-[10px] text-ink-700/60 mt-1">
+                  Si lo defines, la fase se publica sola esas horas antes de la apertura (vía cron).
+                </div>
               </div>
             </div>
             <div className="flex justify-end mt-3">
@@ -903,6 +919,24 @@ function AdminInvitaciones() {
         }`}>{msg.texto}</div>
       )}
 
+      <div className="card p-4 bg-pitch-50 flex flex-wrap items-center justify-between gap-2">
+        <div className="text-sm text-ink-700">
+          Al crear invitaciones, el correo se <b>encola automáticamente</b> y se envía solo (vía cron).
+          Si quieres forzar el envío inmediato, usa este botón.
+        </div>
+        <button className="btn-primary text-sm" onClick={async () => {
+          setMsg(null);
+          try {
+            const r = await procesarCorreosAhora();
+            setMsg({ tipo: 'ok', texto: `✓ Correos procesados: ${r.enviados ?? 0} enviados${r.mensaje ? ' · ' + r.mensaje : ''}` });
+          } catch (err: any) {
+            setMsg({ tipo: 'err', texto: err.message });
+          }
+        }}>
+          ✉ Enviar correos pendientes ahora
+        </button>
+      </div>
+
       <div className="card p-4">
         <h3 className="font-display text-xl mb-2">Invitar un usuario</h3>
         <p className="text-xs text-ink-700 mb-3">
@@ -1432,6 +1466,330 @@ function AdminPremios() {
           </div>
         </>
       )}
+    </div>
+  );
+}
+
+// ============================================================================
+// ADMIN: PAGOS (parcialidades)
+// ============================================================================
+interface EstadoPago {
+  user_id: string;
+  nombre_completo: string;
+  total_pagado: number;
+  costo_total: number;
+  saldo_pendiente: number;
+  liquidado: boolean;
+}
+interface PagoRow {
+  id: string;
+  user_id: string;
+  monto: number;
+  metodo: string | null;
+  nota: string | null;
+  created_at: string;
+}
+
+function AdminPagos() {
+  const [estados, setEstados] = useState<EstadoPago[]>([]);
+  const [costoQuiniela, setCostoQuiniela] = useState<number>(400);
+  const [msg, setMsg] = useState<{ tipo: 'ok' | 'err'; texto: string } | null>(null);
+  const [expandido, setExpandido] = useState<string | null>(null);
+  const [pagosUsuario, setPagosUsuario] = useState<PagoRow[]>([]);
+  const [nuevoPago, setNuevoPago] = useState<{ monto: string; metodo: string; nota: string }>({ monto: '', metodo: 'efectivo', nota: '' });
+  const [filtro, setFiltro] = useState('');
+
+  const cargar = async () => {
+    const { data } = await supabase.from('estado_pagos').select('*').order('nombre_completo');
+    setEstados((data ?? []) as EstadoPago[]);
+    const { data: cfg } = await supabase.from('configuracion').select('valor').eq('clave', 'costo_quiniela').maybeSingle();
+    if (cfg?.valor) setCostoQuiniela(parseFloat(cfg.valor));
+  };
+  useEffect(() => { cargar(); }, []);
+
+  const verPagos = async (userId: string) => {
+    if (expandido === userId) { setExpandido(null); return; }
+    setExpandido(userId);
+    const { data } = await supabase.from('pagos').select('*').eq('user_id', userId).order('created_at');
+    setPagosUsuario((data ?? []) as PagoRow[]);
+  };
+
+  const abonar = async (userId: string) => {
+    setMsg(null);
+    const monto = parseFloat(nuevoPago.monto);
+    if (isNaN(monto) || monto <= 0) { setMsg({ tipo: 'err', texto: 'Monto inválido.' }); return; }
+    const { error } = await supabase.from('pagos').insert({
+      user_id: userId, monto, metodo: nuevoPago.metodo || null, nota: nuevoPago.nota || null,
+    });
+    if (error) { setMsg({ tipo: 'err', texto: error.message }); return; }
+    setMsg({ tipo: 'ok', texto: `✓ Abono de ${fmtPesos(monto)} registrado.` });
+    setNuevoPago({ monto: '', metodo: 'efectivo', nota: '' });
+    await verPagos(userId); // refrescar lista
+    setExpandido(userId);
+    const { data } = await supabase.from('pagos').select('*').eq('user_id', userId).order('created_at');
+    setPagosUsuario((data ?? []) as PagoRow[]);
+    cargar();
+  };
+
+  const borrarPago = async (pagoId: string, userId: string) => {
+    if (!confirm('¿Borrar este abono?')) return;
+    await supabase.from('pagos').delete().eq('id', pagoId);
+    const { data } = await supabase.from('pagos').select('*').eq('user_id', userId).order('created_at');
+    setPagosUsuario((data ?? []) as PagoRow[]);
+    cargar();
+  };
+
+  const guardarCosto = async () => {
+    const { error } = await setConfig('costo_quiniela', String(costoQuiniela));
+    if (error) setMsg({ tipo: 'err', texto: error.message });
+    else { setMsg({ tipo: 'ok', texto: '✓ Costo actualizado.' }); cargar(); }
+  };
+
+  const filtrados = filtro.trim() === '' ? estados
+    : estados.filter(e => e.nombre_completo.toLowerCase().includes(filtro.toLowerCase()));
+
+  const totalRecaudado = estados.reduce((s, e) => s + Number(e.total_pagado), 0);
+  const totalLiquidados = estados.filter(e => e.liquidado).length;
+
+  return (
+    <div className="space-y-4">
+      {msg && <div className={`p-2 rounded text-sm ${msg.tipo === 'ok' ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>{msg.texto}</div>}
+
+      <div className="card p-4 grid sm:grid-cols-3 gap-3">
+        <div>
+          <div className="text-xs text-ink-700 uppercase tracking-widest">Recaudado</div>
+          <div className="font-display text-2xl text-pitch-700">{fmtPesos(totalRecaudado)}</div>
+        </div>
+        <div>
+          <div className="text-xs text-ink-700 uppercase tracking-widest">Liquidados</div>
+          <div className="font-display text-2xl text-pitch-700">{totalLiquidados} / {estados.length}</div>
+        </div>
+        <div>
+          <label className="label">Costo de la quiniela ($)</label>
+          <div className="flex gap-2">
+            <input type="number" className="input" value={costoQuiniela}
+              onChange={e => setCostoQuiniela(parseFloat(e.target.value) || 0)} />
+            <button className="btn-primary text-sm whitespace-nowrap" onClick={guardarCosto}>Guardar</button>
+          </div>
+        </div>
+      </div>
+
+      <div className="card p-4">
+        <input className="input max-w-xs" placeholder="🔍 Buscar participante…"
+          value={filtro} onChange={e => setFiltro(e.target.value)} />
+      </div>
+
+      <div className="card overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead className="bg-pitch-50 text-pitch-700">
+            <tr>
+              <th className="text-left px-3 py-2">Participante</th>
+              <th className="text-right px-3 py-2">Pagado</th>
+              <th className="text-right px-3 py-2">Saldo</th>
+              <th className="text-center px-3 py-2">Estado</th>
+              <th className="px-3 py-2"></th>
+            </tr>
+          </thead>
+          <tbody>
+            {filtrados.map(e => (
+              <>
+                <tr key={e.user_id} className="border-t border-pitch-100">
+                  <td className="px-3 py-2 font-semibold">{e.nombre_completo}</td>
+                  <td className="px-3 py-2 text-right font-mono">{fmtPesos(Number(e.total_pagado))}</td>
+                  <td className="px-3 py-2 text-right font-mono">{fmtPesos(Number(e.saldo_pendiente))}</td>
+                  <td className="px-3 py-2 text-center">
+                    {e.liquidado
+                      ? <span className="badge bg-green-100 text-green-700">✓ Liquidado</span>
+                      : <span className="badge bg-amber-100 text-amber-700">Parcial</span>}
+                  </td>
+                  <td className="px-3 py-2 text-right">
+                    <button className="btn-ghost text-xs" onClick={() => verPagos(e.user_id)}>
+                      {expandido === e.user_id ? 'Cerrar' : 'Abonos / +Pago'}
+                    </button>
+                  </td>
+                </tr>
+                {expandido === e.user_id && (
+                  <tr className="bg-pitch-50/40">
+                    <td colSpan={5} className="px-3 py-3">
+                      <div className="grid sm:grid-cols-4 gap-2 items-end mb-3">
+                        <div>
+                          <label className="label">Monto del abono</label>
+                          <input type="number" className="input" value={nuevoPago.monto}
+                            onChange={ev => setNuevoPago(s => ({ ...s, monto: ev.target.value }))} />
+                        </div>
+                        <div>
+                          <label className="label">Método</label>
+                          <select className="input" value={nuevoPago.metodo}
+                            onChange={ev => setNuevoPago(s => ({ ...s, metodo: ev.target.value }))}>
+                            <option value="efectivo">Efectivo</option>
+                            <option value="transferencia">Transferencia</option>
+                            <option value="otro">Otro</option>
+                          </select>
+                        </div>
+                        <div>
+                          <label className="label">Nota (opcional)</label>
+                          <input className="input" value={nuevoPago.nota}
+                            onChange={ev => setNuevoPago(s => ({ ...s, nota: ev.target.value }))} />
+                        </div>
+                        <button className="btn-accent text-sm" onClick={() => abonar(e.user_id)}>
+                          Registrar abono
+                        </button>
+                      </div>
+                      {pagosUsuario.length > 0 ? (
+                        <table className="w-full text-xs">
+                          <thead className="text-ink-700">
+                            <tr>
+                              <th className="text-left py-1">Fecha</th>
+                              <th className="text-right py-1">Monto</th>
+                              <th className="text-left py-1 pl-3">Método</th>
+                              <th className="text-left py-1">Nota</th>
+                              <th></th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {pagosUsuario.map(pg => (
+                              <tr key={pg.id} className="border-t border-pitch-100">
+                                <td className="py-1">{fmtFechaCorta(pg.created_at)}</td>
+                                <td className="py-1 text-right font-mono">{fmtPesos(Number(pg.monto))}</td>
+                                <td className="py-1 pl-3">{pg.metodo ?? '—'}</td>
+                                <td className="py-1">{pg.nota ?? ''}</td>
+                                <td className="py-1 text-right">
+                                  <button className="text-red-600 text-xs" onClick={() => borrarPago(pg.id, e.user_id)}>borrar</button>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      ) : <div className="text-xs text-ink-700">Sin abonos aún.</div>}
+                    </td>
+                  </tr>
+                )}
+              </>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================================
+// ADMIN: REPORTE (quién no ha pronosticado + exportar Excel)
+// ============================================================================
+interface ProgresoRow {
+  user_id: string;
+  nombre_completo: string;
+  fase_id: string;
+  fase_codigo: string;
+  fase_nombre: string;
+  total_partidos: number;
+  pronosticados: number;
+  faltantes: number;
+}
+
+function AdminReporte() {
+  const [fases, setFases] = useState<Fase[]>([]);
+  const [faseSel, setFaseSel] = useState<string>('');
+  const [progreso, setProgreso] = useState<ProgresoRow[]>([]);
+  const [soloFaltantes, setSoloFaltantes] = useState(true);
+  const [exportando, setExportando] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+
+  useEffect(() => {
+    (async () => {
+      const { data } = await supabase.from('fases').select('*').eq('publicada', true).order('orden');
+      const arr = (data ?? []) as Fase[];
+      setFases(arr);
+      // Preseleccionar fase abierta
+      const abierta = arr.find(f => f.fecha_apertura && f.fecha_cierre &&
+        new Date(f.fecha_apertura) <= new Date() && new Date(f.fecha_cierre) > new Date());
+      setFaseSel(abierta?.id ?? arr[0]?.id ?? '');
+    })();
+  }, []);
+
+  useEffect(() => {
+    if (!faseSel) return;
+    (async () => {
+      const { data } = await supabase.from('progreso_pronosticos').select('*').eq('fase_id', faseSel);
+      setProgreso(((data ?? []) as ProgresoRow[]).sort((a, b) => b.faltantes - a.faltantes));
+    })();
+  }, [faseSel]);
+
+  const exportar = async () => {
+    setExportando(true);
+    setMsg(null);
+    try {
+      await exportarQuinielaExcel();
+      setMsg('✓ Excel generado y descargado.');
+    } catch (err: any) {
+      setMsg('Error al exportar: ' + err.message);
+    } finally {
+      setExportando(false);
+    }
+  };
+
+  const filtrados = soloFaltantes ? progreso.filter(p => p.faltantes > 0) : progreso;
+  const completados = progreso.filter(p => p.faltantes === 0).length;
+
+  return (
+    <div className="space-y-4">
+      {msg && <div className="p-2 bg-green-50 text-green-700 rounded text-sm">{msg}</div>}
+
+      <div className="card p-4 flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h3 className="font-display text-xl">Respaldo completo</h3>
+          <p className="text-xs text-ink-700">Descarga toda la quiniela (ranking, pagos, progreso) en un Excel.</p>
+        </div>
+        <button className="btn-accent" onClick={exportar} disabled={exportando}>
+          {exportando ? 'Generando…' : '📥 Exportar a Excel'}
+        </button>
+      </div>
+
+      <div className="card p-4">
+        <h3 className="font-display text-xl mb-3">Quién ha pronosticado</h3>
+        <div className="flex flex-wrap items-center gap-3 mb-3">
+          <select className="input max-w-xs" value={faseSel} onChange={e => setFaseSel(e.target.value)}>
+            {fases.map(f => <option key={f.id} value={f.id}>{f.nombre}</option>)}
+          </select>
+          <label className="flex items-center gap-2 text-sm">
+            <input type="checkbox" checked={soloFaltantes} onChange={e => setSoloFaltantes(e.target.checked)} />
+            Mostrar solo a quienes les faltan
+          </label>
+          <span className="text-sm text-ink-700">{completados} de {progreso.length} completos</span>
+        </div>
+
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="bg-pitch-50 text-pitch-700">
+              <tr>
+                <th className="text-left px-3 py-2">Participante</th>
+                <th className="text-right px-3 py-2">Pronosticados</th>
+                <th className="text-right px-3 py-2">Faltantes</th>
+                <th className="text-center px-3 py-2">Estado</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtrados.map(p => (
+                <tr key={p.user_id} className="border-t border-pitch-100">
+                  <td className="px-3 py-2 font-semibold">{p.nombre_completo}</td>
+                  <td className="px-3 py-2 text-right font-mono">{p.pronosticados} / {p.total_partidos}</td>
+                  <td className="px-3 py-2 text-right font-mono">{p.faltantes}</td>
+                  <td className="px-3 py-2 text-center">
+                    {p.faltantes === 0
+                      ? <span className="badge bg-green-100 text-green-700">✓ Completo</span>
+                      : <span className="badge bg-amber-100 text-amber-700">Faltan {p.faltantes}</span>}
+                  </td>
+                </tr>
+              ))}
+              {filtrados.length === 0 && (
+                <tr><td colSpan={4} className="text-center text-ink-700 py-4">
+                  {soloFaltantes ? '¡Todos completaron sus pronósticos en esta fase!' : 'Sin datos.'}
+                </td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
     </div>
   );
 }

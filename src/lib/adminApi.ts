@@ -40,3 +40,20 @@ export async function invitarMasivo(
 export async function eliminarUsuario(user_id: string): Promise<{ ok: boolean }> {
   return callEdge('eliminar_usuario', { user_id });
 }
+
+// Disparar el envío de la cola de correos manualmente (sin esperar al cron)
+export async function procesarCorreosAhora(): Promise<any> {
+  const { data: { session } } = await supabase.auth.getSession();
+  const url = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/procesar-correos`;
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${session?.access_token ?? import.meta.env.VITE_SUPABASE_ANON_KEY}`,
+    },
+    body: '{}',
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data?.error ?? `HTTP ${res.status}`);
+  return data;
+}

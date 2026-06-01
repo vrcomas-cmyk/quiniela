@@ -80,6 +80,11 @@ export function MisPronosticos() {
 
   const faseActual = fases.find(f => f.id === faseSel);
 
+  const numPronosticados = useMemo(
+    () => partidos.filter(p => p.pronostico).length,
+    [partidos]
+  );
+
   const partidosPorGrupo = useMemo(() => {
     const m: Record<string, PartidoConPronostico[]> = {};
     partidos.forEach(p => {
@@ -196,6 +201,20 @@ export function MisPronosticos() {
                 Exacto: <b>{faseActual.pts_marcador_exacto} pts</b> ·
                 Acierto resultado: <b>{faseActual.pts_acierto_resultado} pts</b>
               </div>
+              {partidos.length > 0 && (
+                <div className="mt-2">
+                  <div className="text-xs text-pitch-100 mb-1">
+                    Llevas <b className="text-fire-400">{numPronosticados}</b> de <b>{partidos.length}</b> partidos pronosticados
+                    {numPronosticados < partidos.length && !faseCerrada && (
+                      <span className="text-fire-400"> · te faltan {partidos.length - numPronosticados}</span>
+                    )}
+                  </div>
+                  <div className="w-48 h-2 bg-pitch-900/40 rounded-full overflow-hidden">
+                    <div className="h-full bg-fire-500 transition-all"
+                      style={{ width: `${partidos.length ? (numPronosticados / partidos.length) * 100 : 0}%` }} />
+                  </div>
+                </div>
+              )}
             </div>
             <div>
               {!faseActual.fecha_cierre && (

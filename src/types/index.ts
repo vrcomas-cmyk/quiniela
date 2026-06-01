@@ -21,6 +21,7 @@ export interface Fase {
   fecha_apertura: string | null;
   fecha_cierre: string | null;
   publicada: boolean;
+  publicar_horas_antes: number | null;
   created_at: string;
 }
 

@@ -92,30 +92,35 @@ begin
       on conflict (user_id, partido_id) do nothing;
     end loop;
 
-    -- Pronósticos de clasificación: 1° y 2° de cada grupo (equipos reales de ese grupo)
+    -- Pronósticos de clasificación: 1° y 2° de cada grupo (equipos reales de ese grupo, distintos)
     for v_grupo in
       select id from public.grupos order by codigo
     loop
-      -- Tomar 2 equipos aleatorios distintos de ese grupo
-      insert into public.pronosticos_clasificacion (user_id, tipo, grupo_id, posicion, equipo)
-      select v_user_id, 'clasif_grupo', v_grupo.id, 1, e.equipo
-      from (
-        select equipo from (
+      declare
+        v_eq1 text;
+        v_eq2 text;
+      begin
+        select equipo into v_eq1 from (
           select equipo_local as equipo from public.partidos where grupo_id = v_grupo.id
           union
           select equipo_visitante from public.partidos where grupo_id = v_grupo.id
-        ) q order by random() limit 1
-      ) e;
+        ) q order by random() limit 1;
 
-      insert into public.pronosticos_clasificacion (user_id, tipo, grupo_id, posicion, equipo)
-      select v_user_id, 'clasif_grupo', v_grupo.id, 2, e.equipo
-      from (
-        select equipo from (
+        select equipo into v_eq2 from (
           select equipo_local as equipo from public.partidos where grupo_id = v_grupo.id
           union
           select equipo_visitante from public.partidos where grupo_id = v_grupo.id
-        ) q order by random() limit 1
-      ) e;
+        ) q where equipo <> v_eq1 order by random() limit 1;
+
+        if v_eq1 is not null then
+          insert into public.pronosticos_clasificacion (user_id, tipo, grupo_id, posicion, equipo)
+          values (v_user_id, 'clasif_grupo', v_grupo.id, 1, v_eq1);
+        end if;
+        if v_eq2 is not null then
+          insert into public.pronosticos_clasificacion (user_id, tipo, grupo_id, posicion, equipo)
+          values (v_user_id, 'clasif_grupo', v_grupo.id, 2, v_eq2);
+        end if;
+      end;
     end loop;
 
     -- 8 terceros aleatorios (equipos distintos del torneo)
