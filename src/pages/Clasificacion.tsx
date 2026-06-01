@@ -3,7 +3,7 @@ import { supabase } from '../lib/supabase';
 import { Fase, Grupo, PronosticoClasificacion } from '../types';
 import { useAuthCtx } from '../hooks/AuthContext';
 import { Countdown } from '../components/Countdown';
-import { estaCerrado } from '../lib/fechas';
+import { estaCerrado, antesDeAbrir } from '../lib/fechas';
 
 const POSICIONES_FINALES = ['Campeón', 'Subcampeón', '3er Lugar', '4to Lugar'];
 
@@ -82,6 +82,10 @@ export function Clasificacion() {
     setMsg(null);
 
     // Validar que estemos en periodo
+    if (antesDeAbrir(faseGrupos.fecha_apertura)) {
+      setMsg({ tipo: 'err', texto: 'Los pronósticos de clasificación todavía no abren.' });
+      return;
+    }
     if (estaCerrado(faseGrupos.fecha_cierre)) {
       setMsg({ tipo: 'err', texto: 'La fase ya está cerrada.' });
       return;
@@ -124,7 +128,9 @@ export function Clasificacion() {
 
   if (loading) return <div className="text-center py-12 text-pitch-700">Cargando…</div>;
 
-  const cerrada = estaCerrado(faseGrupos?.fecha_cierre ?? null);
+  const noAbierta = antesDeAbrir(faseGrupos?.fecha_apertura ?? null);
+  // "bloqueada" = no se puede editar (ni antes de abrir, ni después de cerrar)
+  const cerrada = noAbierta || estaCerrado(faseGrupos?.fecha_cierre ?? null);
 
   return (
     <div className="space-y-4">
@@ -137,10 +143,18 @@ export function Clasificacion() {
               y tu top 4 final del Mundial. Tiene puntos adicionales sobre los pronósticos de partido.
             </p>
           </div>
-          {!cerrada && faseGrupos?.fecha_cierre && (
+          {noAbierta && faseGrupos?.fecha_apertura && (
+            <div className="text-right">
+              <span className="badge-pending">AÚN NO ABRE</span>
+              <div className="mt-1">
+                <Countdown fechaCierre={faseGrupos.fecha_apertura} prefix="Abre en" />
+              </div>
+            </div>
+          )}
+          {!noAbierta && !cerrada && faseGrupos?.fecha_cierre && (
             <Countdown fechaCierre={faseGrupos.fecha_cierre} />
           )}
-          {cerrada && <span className="badge-closed">CERRADA</span>}
+          {!noAbierta && cerrada && <span className="badge-closed">CERRADA</span>}
         </div>
       </div>
 
@@ -148,6 +162,16 @@ export function Clasificacion() {
         <div className={`p-3 rounded-lg text-sm ${
           msg.tipo === 'ok' ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'
         }`}>{msg.texto}</div>
+      )}
+
+      {noAbierta && faseGrupos?.fecha_apertura && (
+        <div className="card p-4 bg-amber-50 border-amber-200 text-amber-800 text-sm flex items-center gap-2">
+          <span className="text-xl">🔒</span>
+          <span>
+            Los pronósticos de clasificación todavía no abren. Podrás capturarlos a partir
+            del <b>{new Date(faseGrupos.fecha_apertura).toLocaleString('es-MX')}</b>.
+          </span>
+        </div>
       )}
 
       {/* 1° y 2° por grupo */}

@@ -3,7 +3,7 @@ import { supabase } from '../lib/supabase';
 import { Fase, Grupo, Partido, PronosticoPartido } from '../types';
 import { useAuthCtx } from '../hooks/AuthContext';
 import { Countdown } from '../components/Countdown';
-import { fmtFechaCorta, estaCerrado } from '../lib/fechas';
+import { fmtFechaCorta, estaCerrado, antesDeAbrir } from '../lib/fechas';
 
 interface PartidoConPronostico extends Partido {
   pronostico?: PronosticoPartido;
@@ -167,6 +167,7 @@ export function MisPronosticos() {
 
   const cierreEfectivoFase = faseActual?.fecha_cierre ?? null;
   const faseCerrada = estaCerrado(cierreEfectivoFase);
+  const faseNoAbierta = antesDeAbrir(faseActual?.fecha_apertura ?? null);
 
   return (
     <div className="space-y-4">
@@ -217,13 +218,21 @@ export function MisPronosticos() {
               )}
             </div>
             <div>
-              {!faseActual.fecha_cierre && (
+              {faseNoAbierta && faseActual.fecha_apertura && (
+                <div className="text-right">
+                  <span className="badge-pending">AÚN NO ABRE</span>
+                  <div className="mt-1">
+                    <Countdown fechaCierre={faseActual.fecha_apertura} prefix="Abre en" />
+                  </div>
+                </div>
+              )}
+              {!faseNoAbierta && !faseActual.fecha_cierre && (
                 <span className="badge-pending">No abierta</span>
               )}
-              {faseActual.fecha_cierre && !faseCerrada && (
+              {!faseNoAbierta && faseActual.fecha_cierre && !faseCerrada && (
                 <Countdown fechaCierre={faseActual.fecha_cierre} />
               )}
-              {faseCerrada && faseActual.fecha_cierre && (
+              {!faseNoAbierta && faseCerrada && faseActual.fecha_cierre && (
                 <span className="badge-closed">CERRADA</span>
               )}
             </div>
@@ -239,7 +248,18 @@ export function MisPronosticos() {
         </div>
       )}
 
-      {!faseCerrada && partidos.length > 0 && (
+      {faseNoAbierta && faseActual && faseActual.fecha_apertura && (
+        <div className="card p-4 bg-amber-50 border-amber-200 text-amber-800 text-sm flex items-center gap-2">
+          <span className="text-xl">🔒</span>
+          <span>
+            Los pronósticos de <b>{faseActual.nombre}</b> todavía no abren. Podrás capturar tus
+            marcadores a partir del <b>{fmtFechaCorta(faseActual.fecha_apertura)}</b>. Mientras tanto,
+            puedes ver los partidos pero no editarlos.
+          </span>
+        </div>
+      )}
+
+      {!faseCerrada && !faseNoAbierta && partidos.length > 0 && (
         <div className="flex justify-end">
           <button className="btn-accent" onClick={guardarTodos}>
             Guardar todos los marcadores de esta fase
@@ -273,7 +293,9 @@ export function MisPronosticos() {
 
   function renderPartido(p: PartidoConPronostico) {
     const cierreP = p.cierre_pronostico ?? faseActual?.fecha_cierre ?? null;
-    const pCerrado = estaCerrado(cierreP);
+    // Bloqueado si: aún no abre la fase, O ya pasó el cierre
+    const noHaAbierto = antesDeAbrir(faseActual?.fecha_apertura ?? null);
+    const pCerrado = noHaAbierto || estaCerrado(cierreP);
     const tieneResultado = p.goles_local_oficial !== null && p.goles_visitante_oficial !== null;
     const e = edits[p.id] ?? { local: '', visit: '' };
 
@@ -293,16 +315,18 @@ export function MisPronosticos() {
           <input
             type="number" min={0} max={20}
             className="input w-12 text-center px-1 py-1"
-            value={e.local}
+            value={noHaAbierto ? '' : e.local}
             disabled={pCerrado}
+            placeholder={noHaAbierto ? '–' : ''}
             onChange={(ev) => setEdits(s => ({ ...s, [p.id]: { ...s[p.id], local: ev.target.value } }))}
           />
           <span className="text-ink-700">–</span>
           <input
             type="number" min={0} max={20}
             className="input w-12 text-center px-1 py-1"
-            value={e.visit}
+            value={noHaAbierto ? '' : e.visit}
             disabled={pCerrado}
+            placeholder={noHaAbierto ? '–' : ''}
             onChange={(ev) => setEdits(s => ({ ...s, [p.id]: { ...s[p.id], visit: ev.target.value } }))}
           />
         </div>
@@ -334,7 +358,10 @@ export function MisPronosticos() {
               Guardar
             </button>
           )}
-          {pCerrado && !p.pronostico && (
+          {noHaAbierto && (
+            <span className="text-xs text-amber-600">Aún no abre</span>
+          )}
+          {!noHaAbierto && pCerrado && !p.pronostico && (
             <span className="text-xs text-gray-500">Sin pronóstico</span>
           )}
         </div>
