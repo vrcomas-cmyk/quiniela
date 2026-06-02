@@ -5,7 +5,7 @@ import { fmtFecha, fmtFechaCorta } from '../lib/fechas';
 import { invitarUsuario, invitarMasivo, eliminarUsuario, procesarCorreosAhora, InvitacionMasivaItem } from '../lib/adminApi';
 import { setConfig } from '../hooks/useConfig';
 import { Markdown } from '../components/Markdown';
-import { calcularReparto, fmtPesos, JugadorPuntos, ReporteReparto } from '../lib/premios';
+import { calcularReparto, fmtPesos, parsePorcentajes, sumaPorcentajes, JugadorPuntos, ReporteReparto } from '../lib/premios';
 import { exportarQuinielaExcel } from '../lib/exportarExcel';
 
 type Seccion = 'fases' | 'partidos' | 'resultados' | 'clasificacion_oficial' | 'usuarios' | 'invitaciones' | 'pagos' | 'reporte' | 'premios' | 'configuracion';
@@ -1272,18 +1272,18 @@ function AdminPremios() {
   const [pagoPorPersona, setPagoPorPersona] = useState(400);
   const [aporteFijo, setAporteFijo] = useState(1500);
   const [usarSoloPagados, setUsarSoloPagados] = useState(true);
+  const [porcentajesTexto, setPorcentajesTexto] = useState('35, 25, 20, 15, 5');
   const [reporte, setReporte] = useState<ReporteReparto | null>(null);
   const [loading, setLoading] = useState(true);
+  const [msgCfg, setMsgCfg] = useState<string | null>(null);
 
   const cargar = async () => {
     setLoading(true);
-    // Ranking actual
     const { data: ranking } = await supabase
       .from('ranking')
       .select('user_id, nombre_completo, puntos_totales');
     setJugadores((ranking ?? []) as JugadorPuntos[]);
 
-    // Conteo de profiles
     const { count: totalCount } = await supabase
       .from('profiles')
       .select('id', { count: 'exact', head: true })
@@ -1295,14 +1295,40 @@ function AdminPremios() {
       .eq('pagado', true);
     setParticipantesTotal(totalCount ?? 0);
     setParticipantesPagados(pagadosCount ?? 0);
+
+    // Cargar config de porcentajes y costo/aporte
+    const { data: cfgs } = await supabase
+      .from('configuracion')
+      .select('clave, valor')
+      .in('clave', ['premios_porcentajes', 'costo_quiniela', 'premios_aporte_fijo']);
+    (cfgs ?? []).forEach((c: any) => {
+      if (c.clave === 'premios_porcentajes' && c.valor) setPorcentajesTexto(c.valor);
+      if (c.clave === 'costo_quiniela' && c.valor) setPagoPorPersona(parseFloat(c.valor));
+      if (c.clave === 'premios_aporte_fijo' && c.valor) setAporteFijo(parseFloat(c.valor));
+    });
     setLoading(false);
   };
   useEffect(() => { cargar(); }, []);
 
+  const porcentajes = parsePorcentajes(porcentajesTexto);
+  const sumaPct = sumaPorcentajes(porcentajes);
+  const pctValido = Math.abs(sumaPct - 100) < 0.01;
+
+  const guardarConfigPremios = async () => {
+    setMsgCfg(null);
+    if (!pctValido) {
+      setMsgCfg(`Los porcentajes deben sumar 100% (suman ${sumaPct}%).`);
+      return;
+    }
+    await setConfig('premios_porcentajes', JSON.stringify(porcentajes));
+    await setConfig('premios_aporte_fijo', String(aporteFijo));
+    setMsgCfg('✓ Configuración de premios guardada.');
+  };
+
   const recalcular = () => {
     const n = usarSoloPagados ? participantesPagados : participantesTotal;
     const monto = n * pagoPorPersona;
-    const r = calcularReparto(jugadores, monto, aporteFijo);
+    const r = calcularReparto(jugadores, monto, porcentajes, aporteFijo);
     setReporte(r);
   };
 
@@ -1334,9 +1360,31 @@ function AdminPremios() {
       <div className="card p-4">
         <h3 className="font-display text-xl mb-2">💰 Calculadora de premios</h3>
         <p className="text-xs text-ink-700 mb-3">
-          Calcula el reparto del bote aplicando las reglas oficiales del DOCX (con manejo automático de empates).
-          Usa el ranking actual; corre esto al final del torneo.
+          Configura los porcentajes de premio y calcula el reparto del bote con el ranking actual.
+          El cálculo asume que no hay empates; si los hay, se señalan para que ajustes a mano.
         </p>
+
+        {/* Configuración de porcentajes */}
+        <div className="border border-pitch-100 rounded-lg p-3 mb-4">
+          <label className="label">Porcentajes de premio por lugar (separados por coma)</label>
+          <div className="flex flex-wrap items-center gap-2">
+            <input
+              className="input max-w-md font-mono"
+              value={porcentajesTexto}
+              onChange={e => setPorcentajesTexto(e.target.value)}
+              placeholder="ej. 35, 25, 20, 15, 5"
+            />
+            <button className="btn-primary text-sm" onClick={guardarConfigPremios}>
+              Guardar configuración
+            </button>
+          </div>
+          <div className="text-xs mt-2">
+            <span className={pctValido ? 'text-pitch-700' : 'text-red-600 font-semibold'}>
+              {porcentajes.length} lugar(es) · suma {sumaPct}% {pctValido ? '✓' : '✗ (debe ser 100%)'}
+            </span>
+          </div>
+          {msgCfg && <div className="text-xs mt-1 text-green-700">{msgCfg}</div>}
+        </div>
 
         {loading ? <div className="text-pitch-700">Cargando…</div> : (
           <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-3">
@@ -1367,7 +1415,7 @@ function AdminPremios() {
                   onChange={e => setUsarSoloPagados(e.target.checked)} />
                 Solo contar pagados
               </label>
-              <button className="btn-accent" onClick={recalcular}>
+              <button className="btn-accent" onClick={recalcular} disabled={!pctValido}>
                 Calcular reparto
               </button>
             </div>
@@ -1385,6 +1433,13 @@ function AdminPremios() {
 
       {reporte && (
         <>
+          {reporte.hay_empates && (
+            <div className="card p-3 bg-amber-50 border-amber-200 text-sm text-amber-800">
+              ⚠ <b>Hay empates en posiciones premiadas.</b> El monto por lugar es el oficial,
+              pero debes decidir manualmente cómo repartirlo entre los empatados.
+            </div>
+          )}
+
           <div className="card overflow-x-auto">
             <div className="flex flex-wrap items-center justify-between gap-2 p-3 border-b border-pitch-100">
               <h4 className="font-display text-lg">Reparto calculado</h4>
@@ -1402,9 +1457,18 @@ function AdminPremios() {
               </thead>
               <tbody>
                 {reporte.asignaciones.map((a, i) => (
-                  <tr key={i} className="border-t border-pitch-100">
+                  <tr key={i} className={`border-t border-pitch-100 ${a.empatado ? 'bg-amber-50/50' : ''}`}>
                     <td className="px-3 py-2 font-display">{a.posicion_label}</td>
-                    <td className="px-3 py-2 font-semibold">{a.nombre_completo}</td>
+                    <td className="px-3 py-2 font-semibold">
+                      {a.empatado ? (
+                        <div>
+                          <span className="text-amber-700">⚠ {a.nombre_completo}</span>
+                          <div className="text-xs font-normal text-ink-700">
+                            {a.nombres_empatados?.join(', ')}
+                          </div>
+                        </div>
+                      ) : a.nombre_completo}
+                    </td>
                     <td className="px-3 py-2 text-right font-mono">{a.puntos}</td>
                     <td className="px-3 py-2 text-right font-mono">{a.porcentaje.toFixed(2)}%</td>
                     <td className="px-3 py-2 text-right font-mono font-bold text-pitch-700">{fmtPesos(a.monto)}</td>
@@ -1413,7 +1477,7 @@ function AdminPremios() {
               </tbody>
               <tfoot className="bg-pitch-50">
                 <tr>
-                  <td colSpan={3} className="px-3 py-2 text-right font-semibold">TOTAL repartido:</td>
+                  <td colSpan={3} className="px-3 py-2 text-right font-semibold">TOTAL:</td>
                   <td className="px-3 py-2 text-right font-mono">
                     {reporte.asignaciones.reduce((s, a) => s + a.porcentaje, 0).toFixed(2)}%
                   </td>
@@ -1421,49 +1485,18 @@ function AdminPremios() {
                     {fmtPesos(reporte.asignaciones.reduce((s, a) => s + a.monto, 0))}
                   </td>
                 </tr>
-                {reporte.porcentaje_residual > 0.01 && (
-                  <tr>
-                    <td colSpan={3} className="px-3 py-2 text-right text-amber-700">Residual (no asignado):</td>
-                    <td className="px-3 py-2 text-right font-mono text-amber-700">
-                      {reporte.porcentaje_residual.toFixed(2)}%
-                    </td>
-                    <td className="px-3 py-2 text-right font-mono font-bold text-amber-700">
-                      {fmtPesos(reporte.monto_residual)}
-                    </td>
-                  </tr>
-                )}
               </tfoot>
             </table>
           </div>
 
-          {reporte.desiertos.length > 0 && (
-            <div className="card p-3 bg-amber-50 border-amber-200 text-sm">
-              <b>Lugares desiertos:</b> {reporte.desiertos.map(d => `${d}°`).join(', ')}
-            </div>
-          )}
-
-          {reporte.reglas_aplicadas.length > 0 && (
+          {reporte.notas.length > 0 && (
             <div className="card p-4">
-              <h4 className="font-semibold text-pitch-700 mb-2">Auditoría: reglas aplicadas</h4>
+              <h4 className="font-semibold text-pitch-700 mb-2">Notas</h4>
               <ul className="text-sm text-ink-700 space-y-1">
-                {reporte.reglas_aplicadas.map((r, i) => (
-                  <li key={i}>• {r}</li>
-                ))}
+                {reporte.notas.map((n, i) => <li key={i}>• {n}</li>)}
               </ul>
             </div>
           )}
-
-          <div className="card p-4 text-xs text-ink-700">
-            <b>Referencia de reglas oficiales (DOCX):</b>
-            <ul className="mt-2 space-y-1">
-              <li><b>Sin empates:</b> 1° 35%, 2° 25%, 3° 20%, 4° 15%, 5° 5%</li>
-              <li><b>R1 (≥3 empatados en 1°):</b> 80% para 1°, 20% para el siguiente, 4° y 5° desiertos.</li>
-              <li><b>R2 (1°≤2 ganadores y &gt;2 empatados en 2°):</b> 1° comparte 60%, 2° comparte 40%, 4° y 5° desiertos.</li>
-              <li><b>R3 (empate en 3°):</b> comparten 40% (20+15+5), 4° y 5° desiertos.</li>
-              <li><b>R4 (empate en 4°):</b> comparten 20% (15+5), 5° desierto.</li>
-              <li><b>R5 (empate en 5°):</b> comparten el 5%.</li>
-            </ul>
-          </div>
         </>
       )}
     </div>

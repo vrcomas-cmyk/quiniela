@@ -2,9 +2,12 @@ import { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { RankingRow } from '../types';
 import { useAuthCtx } from '../hooks/AuthContext';
+import { useConfig } from '../hooks/useConfig';
+import { Markdown } from '../components/Markdown';
 
 export function Ranking() {
   const { profile } = useAuthCtx();
+  const { valor: premios } = useConfig('texto_premios');
   const [rows, setRows] = useState<RankingRow[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -31,9 +34,9 @@ export function Ranking() {
     <div className="space-y-4">
       <div className="card p-6 bg-gradient-to-r from-pitch-700 to-pitch-900 text-white">
         <h2 className="font-display text-3xl">RANKING GENERAL</h2>
-        <p className="text-pitch-100 text-sm mt-1">
-          Premios: 1° 35% · 2° 25% · 3° 20% · 4° 15% · 5° 5% del bote total
-        </p>
+        <div className="text-pitch-100 text-sm mt-1">
+          <Markdown text={premios} />
+        </div>
       </div>
 
       <div className="card overflow-hidden">
