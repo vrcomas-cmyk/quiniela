@@ -13,6 +13,7 @@ export function Clasificacion() {
   const [grupos, setGrupos] = useState<Grupo[]>([]);
   const [pronos, setPronos] = useState<PronosticoClasificacion[]>([]);
   const [todosEquipos, setTodosEquipos] = useState<string[]>([]);
+  const [equiposGrupo, setEquiposGrupo] = useState<Record<string, string[]>>({});
   const [loading, setLoading] = useState(true);
   const [msg, setMsg] = useState<{ tipo: 'ok' | 'err'; texto: string } | null>(null);
 
@@ -33,11 +34,23 @@ export function Clasificacion() {
 
     // Extraer todos los equipos únicos del torneo (de los partidos de fase de grupos)
     const setEq = new Set<string>();
+    // Y agrupar equipos por su grupo_id
+    const porGrupo: Record<string, Set<string>> = {};
     (partidosRes.data ?? []).forEach((p: any) => {
       setEq.add(p.equipo_local);
       setEq.add(p.equipo_visitante);
+      if (p.grupo_id) {
+        if (!porGrupo[p.grupo_id]) porGrupo[p.grupo_id] = new Set<string>();
+        porGrupo[p.grupo_id].add(p.equipo_local);
+        porGrupo[p.grupo_id].add(p.equipo_visitante);
+      }
     });
     setTodosEquipos(Array.from(setEq).sort());
+    const mapaGrupo: Record<string, string[]> = {};
+    Object.entries(porGrupo).forEach(([gid, set]) => {
+      mapaGrupo[gid] = Array.from(set).sort();
+    });
+    setEquiposGrupo(mapaGrupo);
 
     if (user) {
       const { data: pronosData } = await supabase
@@ -73,8 +86,9 @@ export function Clasificacion() {
   useEffect(() => { cargar(); }, [user]);
 
   const equiposPorGrupo = (grupoId: string): string[] => {
-    // Aquí podríamos filtrar equipos por grupo, pero al inicio usamos todos
-    return todosEquipos;
+    // Solo los equipos que pertenecen a ese grupo (según los partidos cargados).
+    // Si aún no hay partidos de ese grupo, no mostramos opciones.
+    return equiposGrupo[grupoId] ?? [];
   };
 
   const guardar = async () => {
