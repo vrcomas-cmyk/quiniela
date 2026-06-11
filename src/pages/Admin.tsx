@@ -1204,11 +1204,63 @@ function AdminConfiguracion() {
     else { setMsg({ tipo: 'ok', texto: `✓ ${clave} actualizado` }); cargar(); }
   };
 
+  // Helpers para el cierre de clasificación (datetime-local <-> ISO)
+  const isoADatetimeLocal = (iso: string): string => {
+    if (!iso) return '';
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return '';
+    // ajustar a hora local para el input
+    const off = d.getTimezoneOffset();
+    const local = new Date(d.getTime() - off * 60000);
+    return local.toISOString().slice(0, 16);
+  };
+  const guardarCierreClasif = async (valorLocal: string) => {
+    setMsg(null);
+    // Convertir el datetime-local a ISO (o vacío para "usar el de grupos")
+    const iso = valorLocal ? new Date(valorLocal).toISOString() : '';
+    const { error } = await setConfig('cierre_clasificacion', iso);
+    if (error) setMsg({ tipo: 'err', texto: error.message });
+    else { setMsg({ tipo: 'ok', texto: '✓ Cierre de clasificación actualizado' }); cargar(); }
+  };
+
   return (
     <div className="space-y-4">
       {msg && <div className={`p-2 rounded text-sm ${
         msg.tipo === 'ok' ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'
       }`}>{msg.texto}</div>}
+
+      <div className="card p-4">
+        <h3 className="font-display text-xl mb-2">Cierre de Clasificación</h3>
+        <p className="text-xs text-ink-700 mb-3">
+          Fecha y hora límite para que los jugadores llenen sus pronósticos de clasificación
+          (1°/2° por grupo, terceros, top 4). Puede ser <b>después</b> del cierre de la fase de grupos,
+          para darles tiempo extra. Si lo dejas vacío, se usa el cierre de la fase de grupos.
+        </p>
+        <div className="flex flex-wrap items-end gap-2">
+          <div>
+            <label className="label">Cierre de clasificación</label>
+            <input
+              type="datetime-local"
+              className="input"
+              value={isoADatetimeLocal(edits['cierre_clasificacion'] ?? '')}
+              onChange={e => setEdits(s => ({ ...s, cierre_clasificacion: e.target.value ? new Date(e.target.value).toISOString() : '' }))}
+            />
+          </div>
+          <button className="btn-primary text-sm" onClick={() => guardarCierreClasif(
+            edits['cierre_clasificacion'] ? isoADatetimeLocal(edits['cierre_clasificacion']) : ''
+          )}>
+            Guardar cierre
+          </button>
+          <button className="btn-ghost text-sm" onClick={() => guardarCierreClasif('')}>
+            Limpiar (usar cierre de grupos)
+          </button>
+        </div>
+        {edits['cierre_clasificacion'] && (
+          <div className="text-xs text-pitch-700 mt-2">
+            Cierre actual: {new Date(edits['cierre_clasificacion']).toLocaleString('es-MX')}
+          </div>
+        )}
+      </div>
 
       <div className="card p-4">
         <h3 className="font-display text-xl mb-2">Textos editables de la app</h3>
@@ -1222,7 +1274,7 @@ function AdminConfiguracion() {
         </p>
       </div>
 
-      {items.map(item => (
+      {items.filter(it => it.clave !== 'cierre_clasificacion').map(item => (
         <div key={item.clave} className="card p-4">
           <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
             <div>

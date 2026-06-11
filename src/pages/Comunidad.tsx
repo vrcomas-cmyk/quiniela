@@ -42,24 +42,39 @@ export function Comunidad() {
         setMatriz({}); setJugadores([]); setLoading(false); return;
       }
 
-      const { data: pronosData } = await supabase
-        .from('pronosticos_partido')
-        .select('user_id, partido_id, goles_local, goles_visitante, puntos_obtenidos')
-        .in('partido_id', ids);
-
-      const userIds = Array.from(new Set((pronosData ?? []).map((p: any) => p.user_id)));
-      if (userIds.length > 0) {
-        const { data: profData } = await supabase
-          .from('profiles').select('*').in('id', userIds);
-        setJugadores(((profData ?? []) as Profile[]).sort((a, b) =>
-          a.nombre_completo.localeCompare(b.nombre_completo)
-        ));
-      } else {
-        setJugadores([]);
+      // Traer TODOS los pronósticos de estos partidos. Supabase limita cada
+      // consulta a 1000 filas, así que paginamos en bloques hasta traerlos todos
+      // (una fase de grupos puede tener 72 partidos x ~100 jugadores = 7000+ filas).
+      const pronosData: any[] = [];
+      const TAM = 1000;
+      let desde = 0;
+      // eslint-disable-next-line no-constant-condition
+      while (true) {
+        const { data: bloque, error } = await supabase
+          .from('pronosticos_partido')
+          .select('user_id, partido_id, goles_local, goles_visitante, puntos_obtenidos')
+          .in('partido_id', ids)
+          .range(desde, desde + TAM - 1);
+        if (error) break;
+        const arr = bloque ?? [];
+        pronosData.push(...arr);
+        if (arr.length < TAM) break; // ya no hay más
+        desde += TAM;
       }
 
+      // Cargar TODOS los jugadores (no solo los que aparecen en pronosData),
+      // para que todas las columnas se muestren aunque a alguien le falte un
+      // pronóstico en algún partido.
+      const { data: profData } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('rol', 'jugador');
+      setJugadores(((profData ?? []) as Profile[]).sort((a, b) =>
+        a.nombre_completo.localeCompare(b.nombre_completo)
+      ));
+
       const mat: Record<string, Record<string, CelaCell>> = {};
-      (pronosData ?? []).forEach((p: any) => {
+      pronosData.forEach((p: any) => {
         if (!mat[p.partido_id]) mat[p.partido_id] = {};
         mat[p.partido_id][p.user_id] = {
           goles_local: p.goles_local,
