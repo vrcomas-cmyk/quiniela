@@ -1720,11 +1720,24 @@ interface ProgresoRow {
   faltantes: number;
 }
 
+interface ProgresoClasifRow {
+  user_id: string;
+  nombre_completo: string;
+  total_esperado: number;
+  llenados: number;
+  grupos_llenados: number;
+  terceros_llenados: number;
+  top4_llenados: number;
+  faltantes: number;
+}
+
 function AdminReporte() {
   const [fases, setFases] = useState<Fase[]>([]);
   const [faseSel, setFaseSel] = useState<string>('');
   const [progreso, setProgreso] = useState<ProgresoRow[]>([]);
+  const [progresoClasif, setProgresoClasif] = useState<ProgresoClasifRow[]>([]);
   const [soloFaltantes, setSoloFaltantes] = useState(true);
+  const [soloFaltantesClasif, setSoloFaltantesClasif] = useState(true);
   const [exportando, setExportando] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
 
@@ -1733,10 +1746,14 @@ function AdminReporte() {
       const { data } = await supabase.from('fases').select('*').eq('publicada', true).order('orden');
       const arr = (data ?? []) as Fase[];
       setFases(arr);
-      // Preseleccionar fase abierta
       const abierta = arr.find(f => f.fecha_apertura && f.fecha_cierre &&
         new Date(f.fecha_apertura) <= new Date() && new Date(f.fecha_cierre) > new Date());
       setFaseSel(abierta?.id ?? arr[0]?.id ?? '');
+    })();
+    // Cargar progreso de clasificación (no depende de la fase seleccionada)
+    (async () => {
+      const { data } = await supabase.from('progreso_clasificacion').select('*');
+      setProgresoClasif(((data ?? []) as ProgresoClasifRow[]).sort((a, b) => b.faltantes - a.faltantes));
     })();
   }, []);
 
@@ -1763,6 +1780,9 @@ function AdminReporte() {
 
   const filtrados = soloFaltantes ? progreso.filter(p => p.faltantes > 0) : progreso;
   const completados = progreso.filter(p => p.faltantes === 0).length;
+
+  const filtradosClasif = soloFaltantesClasif ? progresoClasif.filter(p => p.faltantes > 0) : progresoClasif;
+  const completadosClasif = progresoClasif.filter(p => p.faltantes === 0).length;
 
   return (
     <div className="space-y-4">
@@ -1817,6 +1837,56 @@ function AdminReporte() {
               {filtrados.length === 0 && (
                 <tr><td colSpan={4} className="text-center text-ink-700 py-4">
                   {soloFaltantes ? '¡Todos completaron sus pronósticos en esta fase!' : 'Sin datos.'}
+                </td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div className="card p-4">
+        <h3 className="font-display text-xl mb-1">Quién ha llenado la Clasificación</h3>
+        <p className="text-xs text-ink-700 mb-3">
+          1° y 2° de cada grupo, 8 terceros y top 4. Total: {progresoClasif[0]?.total_esperado ?? 36} pronósticos.
+        </p>
+        <div className="flex flex-wrap items-center gap-3 mb-3">
+          <label className="flex items-center gap-2 text-sm">
+            <input type="checkbox" checked={soloFaltantesClasif} onChange={e => setSoloFaltantesClasif(e.target.checked)} />
+            Mostrar solo a quienes les faltan
+          </label>
+          <span className="text-sm text-ink-700">{completadosClasif} de {progresoClasif.length} completos</span>
+        </div>
+
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="bg-pitch-50 text-pitch-700">
+              <tr>
+                <th className="text-left px-3 py-2">Participante</th>
+                <th className="text-right px-3 py-2">Grupos</th>
+                <th className="text-right px-3 py-2">Terceros</th>
+                <th className="text-right px-3 py-2">Top 4</th>
+                <th className="text-right px-3 py-2">Total</th>
+                <th className="text-center px-3 py-2">Estado</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtradosClasif.map(p => (
+                <tr key={p.user_id} className="border-t border-pitch-100">
+                  <td className="px-3 py-2 font-semibold">{p.nombre_completo}</td>
+                  <td className="px-3 py-2 text-right font-mono">{p.grupos_llenados}/24</td>
+                  <td className="px-3 py-2 text-right font-mono">{p.terceros_llenados}/8</td>
+                  <td className="px-3 py-2 text-right font-mono">{p.top4_llenados}/4</td>
+                  <td className="px-3 py-2 text-right font-mono">{p.llenados}/{p.total_esperado}</td>
+                  <td className="px-3 py-2 text-center">
+                    {p.faltantes === 0
+                      ? <span className="badge bg-green-100 text-green-700">✓ Completo</span>
+                      : <span className="badge bg-amber-100 text-amber-700">Faltan {p.faltantes}</span>}
+                  </td>
+                </tr>
+              ))}
+              {filtradosClasif.length === 0 && (
+                <tr><td colSpan={6} className="text-center text-ink-700 py-4">
+                  {soloFaltantesClasif ? '¡Todos completaron su clasificación!' : 'Sin datos.'}
                 </td></tr>
               )}
             </tbody>

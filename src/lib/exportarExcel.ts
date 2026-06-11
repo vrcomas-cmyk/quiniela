@@ -74,6 +74,25 @@ export async function exportarQuinielaExcel(): Promise<void> {
     XLSX.utils.book_append_sheet(wb, wsProgreso, 'Progreso pronósticos');
   }
 
+  // ----- HOJA 4: Progreso de clasificación -----
+  const { data: progClasif } = await supabase
+    .from('progreso_clasificacion')
+    .select('*')
+    .order('faltantes', { ascending: false });
+  const filasClasif = (progClasif ?? []).map((p: any) => ({
+    'Participante': p.nombre_completo,
+    'Grupos (de 24)': p.grupos_llenados,
+    'Terceros (de 8)': p.terceros_llenados,
+    'Top 4 (de 4)': p.top4_llenados,
+    'Total llenado': `${p.llenados}/${p.total_esperado}`,
+    'Faltantes': p.faltantes,
+    'Estado': p.faltantes === 0 ? 'Completo' : 'Incompleto',
+  }));
+  if (filasClasif.length > 0) {
+    const wsClasif = XLSX.utils.json_to_sheet(filasClasif);
+    XLSX.utils.book_append_sheet(wb, wsClasif, 'Progreso clasificación');
+  }
+
   // Descargar
   const fecha = new Date().toISOString().slice(0, 10);
   XLSX.writeFile(wb, `quiniela-mundial-2026-${fecha}.xlsx`);
