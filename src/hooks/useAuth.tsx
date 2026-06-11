@@ -73,7 +73,22 @@ export function useAuth() {
     await supabase.auth.signOut();
   };
 
+  // Enviar correo de recuperación de contraseña.
+  // El link del correo lleva a /restablecer (configurado abajo en redirectTo).
+  const enviarRecuperacion = async (email: string) => {
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: `${window.location.origin}/restablecer`,
+    });
+    if (error) throw error;
+  };
+
+  // Actualizar la contraseña del usuario actual (tras llegar del link de recuperación).
+  const actualizarPassword = async (nuevaPassword: string) => {
+    const { error } = await supabase.auth.updateUser({ password: nuevaPassword });
+    if (error) throw error;
+  };
+
   const isAdmin = profile?.rol === 'admin';
 
-  return { session, user, profile, loading, isAdmin, signIn, signUp, signOut };
+  return { session, user, profile, loading, isAdmin, signIn, signUp, signOut, enviarRecuperacion, actualizarPassword };
 }

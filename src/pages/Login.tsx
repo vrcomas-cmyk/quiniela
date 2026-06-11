@@ -3,9 +3,9 @@ import { useNavigate } from 'react-router-dom';
 import { useAuthCtx } from '../hooks/AuthContext';
 
 export function Login() {
-  const { signIn, signUp } = useAuthCtx();
+  const { signIn, signUp, enviarRecuperacion } = useAuthCtx();
   const navigate = useNavigate();
-  const [mode, setMode] = useState<'login' | 'register'>('login');
+  const [mode, setMode] = useState<'login' | 'register' | 'recuperar'>('login');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [nombre, setNombre] = useState('');
@@ -22,6 +22,10 @@ export function Login() {
       if (mode === 'login') {
         await signIn(email, password);
         navigate('/');
+      } else if (mode === 'recuperar') {
+        if (!email) throw new Error('Escribe tu correo.');
+        await enviarRecuperacion(email);
+        setInfo('Si el correo existe, te enviamos un enlace para restablecer tu contraseña. Revisa tu bandeja (y la carpeta de spam).');
       } else {
         if (nombre.trim().length < 3) {
           throw new Error('El nombre completo debe tener al menos 3 caracteres.');
@@ -94,17 +98,29 @@ export function Login() {
                 required
               />
             </div>
-            <div>
-              <label className="label">Contraseña</label>
-              <input
-                type="password"
-                className="input"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                required
-                minLength={6}
-              />
-            </div>
+            {mode !== 'recuperar' && (
+              <div>
+                <label className="label">Contraseña</label>
+                <input
+                  type="password"
+                  className="input"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  required
+                  minLength={6}
+                />
+              </div>
+            )}
+
+            {mode === 'login' && (
+              <button
+                type="button"
+                onClick={() => { setMode('recuperar'); setError(null); setInfo(null); }}
+                className="text-xs text-pitch-700 hover:underline"
+              >
+                ¿Olvidaste tu contraseña?
+              </button>
+            )}
 
             {error && (
               <div className="text-sm bg-red-50 text-red-700 p-2 rounded">{error}</div>
@@ -114,8 +130,21 @@ export function Login() {
             )}
 
             <button type="submit" className="btn-accent w-full" disabled={loading}>
-              {loading ? 'Procesando…' : mode === 'login' ? 'Entrar' : 'Crear cuenta'}
+              {loading ? 'Procesando…'
+                : mode === 'login' ? 'Entrar'
+                : mode === 'recuperar' ? 'Enviar enlace de recuperación'
+                : 'Crear cuenta'}
             </button>
+
+            {mode === 'recuperar' && (
+              <button
+                type="button"
+                onClick={() => { setMode('login'); setError(null); setInfo(null); }}
+                className="text-xs text-ink-700 hover:underline w-full text-center"
+              >
+                ← Volver a iniciar sesión
+              </button>
+            )}
           </form>
         </div>
 

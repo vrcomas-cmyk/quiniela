@@ -4,6 +4,7 @@ import { ProtectedRoute } from './components/ProtectedRoute';
 import { Layout } from './components/Layout';
 import { Login } from './pages/Login';
 import { Invite } from './pages/Invite';
+import { Restablecer } from './pages/Restablecer';
 import { Home } from './pages/Home';
 import { MisPronosticos } from './pages/MisPronosticos';
 import { Clasificacion } from './pages/Clasificacion';
@@ -18,6 +19,7 @@ export function App() {
         <Routes>
           <Route path="/login" element={<Login />} />
           <Route path="/invite" element={<Invite />} />
+          <Route path="/restablecer" element={<Restablecer />} />
           <Route
             element={
               <ProtectedRoute>
