@@ -1095,6 +1095,18 @@ function AdminUsuarios() {
     else cargar();
   };
 
+  const togglePuedeEditar = async (u: Profile) => {
+    const nuevo = !u.puede_editar;
+    const { error } = await supabase.from('profiles').update({ puede_editar: nuevo }).eq('id', u.id);
+    if (error) setMsg({ tipo: 'err', texto: error.message });
+    else {
+      setMsg({ tipo: 'ok', texto: nuevo
+        ? `✓ ${u.nombre_completo} ahora PUEDE editar aunque esté cerrado. Recuerda quitarlo cuando termine.`
+        : `✓ Se quitó el permiso de edición a ${u.nombre_completo}.` });
+      cargar();
+    }
+  };
+
   const eliminar = async (u: Profile) => {
     const confirmacion = `¿ELIMINAR a ${u.nombre_completo}?\n\n` +
       `Esto borrará permanentemente:\n` +
@@ -1132,6 +1144,7 @@ function AdminUsuarios() {
               <th className="text-left px-3 py-2">Nombre</th>
               <th className="text-left px-3 py-2">Rol</th>
               <th className="text-center px-3 py-2">Pagado</th>
+              <th className="text-center px-3 py-2">Edición extra</th>
               <th className="text-left px-3 py-2">Registrado</th>
               <th className="px-3 py-2"></th>
             </tr>
@@ -1148,6 +1161,13 @@ function AdminUsuarios() {
                 <td className="px-3 py-2 text-center">
                   <button onClick={() => togglePago(u)} className={`badge ${u.pagado ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
                     {u.pagado ? '✓ Pagado' : 'Pendiente'}
+                  </button>
+                </td>
+                <td className="px-3 py-2 text-center">
+                  <button onClick={() => togglePuedeEditar(u)}
+                    className={`badge ${u.puede_editar ? 'bg-fire-500 text-white' : 'bg-pitch-50 text-pitch-700'}`}
+                    title="Permite a este jugador editar sus pronósticos aunque la fase esté cerrada">
+                    {u.puede_editar ? '🔓 Habilitado' : 'Cerrado'}
                   </button>
                 </td>
                 <td className="px-3 py-2 text-xs">{fmtFecha(u.created_at)}</td>
@@ -1836,6 +1856,22 @@ function AdminReporte() {
   const filtradosClasif = soloFaltantesClasif ? progresoClasif.filter(p => p.faltantes > 0) : progresoClasif;
   const completadosClasif = progresoClasif.filter(p => p.faltantes === 0).length;
 
+  const [faltaClasif, setFaltaClasif] = useState<any[]>([]);
+  const [cargandoFalta, setCargandoFalta] = useState(false);
+  const consultarFaltaClasif = async () => {
+    setCargandoFalta(true);
+    const { data, error } = await supabase.rpc('reporte_falta_clasificacion');
+    if (!error) setFaltaClasif(data ?? []);
+    setCargandoFalta(false);
+  };
+  useEffect(() => { consultarFaltaClasif(); }, []);
+
+  const copiarCorreos = () => {
+    const correos = faltaClasif.map((f: any) => f.email).join(', ');
+    navigator.clipboard.writeText(correos);
+    setMsg('✓ Correos copiados al portapapeles');
+  };
+
   return (
     <div className="space-y-4">
       {msg && <div className="p-2 bg-green-50 text-green-700 rounded text-sm">{msg}</div>}
@@ -1944,6 +1980,50 @@ function AdminReporte() {
             </tbody>
           </table>
         </div>
+      </div>
+
+      <div className="card p-4">
+        <div className="flex flex-wrap items-center justify-between gap-2 mb-1">
+          <h3 className="font-display text-xl">Tienen pronósticos pero les falta Clasificación</h3>
+          <div className="flex gap-2">
+            <button className="btn-ghost text-xs" onClick={consultarFaltaClasif}>↻ Actualizar</button>
+            {faltaClasif.length > 0 && (
+              <button className="btn-primary text-xs" onClick={copiarCorreos}>📋 Copiar correos</button>
+            )}
+          </div>
+        </div>
+        <p className="text-xs text-ink-700 mb-3">
+          Jugadores que ya pronosticaron partidos pero NO terminaron su clasificación. Útil para recordarles por correo.
+        </p>
+        {cargandoFalta ? <div className="text-sm text-ink-700">Cargando…</div> : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-pitch-50 text-pitch-700">
+                <tr>
+                  <th className="text-left px-3 py-2">Nombre</th>
+                  <th className="text-left px-3 py-2">Correo</th>
+                  <th className="text-right px-3 py-2">Llenó</th>
+                  <th className="text-right px-3 py-2">Le faltan</th>
+                </tr>
+              </thead>
+              <tbody>
+                {faltaClasif.map((f: any, i: number) => (
+                  <tr key={i} className="border-t border-pitch-100">
+                    <td className="px-3 py-2 font-semibold">{f.nombre_completo}</td>
+                    <td className="px-3 py-2 text-ink-700">{f.email}</td>
+                    <td className="px-3 py-2 text-right font-mono">{f.clasif_llenados}/{f.clasif_total}</td>
+                    <td className="px-3 py-2 text-right font-mono text-amber-700">{f.clasif_faltantes}</td>
+                  </tr>
+                ))}
+                {faltaClasif.length === 0 && (
+                  <tr><td colSpan={4} className="text-center text-ink-700 py-4">
+                    Nadie tiene pronósticos con clasificación incompleta. 🎉
+                  </td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
     </div>
   );

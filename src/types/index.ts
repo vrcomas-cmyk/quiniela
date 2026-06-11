@@ -5,6 +5,7 @@ export interface Profile {
   nombre_completo: string;
   rol: Rol;
   pagado: boolean;
+  puede_editar?: boolean;
   created_at: string;
 }
 
