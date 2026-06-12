@@ -8,7 +8,7 @@ import { Markdown } from '../components/Markdown';
 import { calcularReparto, fmtPesos, parsePorcentajes, sumaPorcentajes, JugadorPuntos, ReporteReparto } from '../lib/premios';
 import { exportarQuinielaExcel } from '../lib/exportarExcel';
 
-type Seccion = 'fases' | 'partidos' | 'resultados' | 'clasificacion_oficial' | 'usuarios' | 'invitaciones' | 'pagos' | 'reporte' | 'premios' | 'configuracion';
+type Seccion = 'fases' | 'partidos' | 'resultados' | 'clasificacion_oficial' | 'usuarios' | 'invitaciones' | 'pagos' | 'reporte' | 'capturar' | 'premios' | 'configuracion';
 
 export function Admin() {
   const [seccion, setSeccion] = useState<Seccion>('fases');
@@ -32,6 +32,7 @@ export function Admin() {
           ['usuarios', '👥 Usuarios'],
           ['pagos', '💵 Pagos'],
           ['reporte', '📊 Reporte'],
+          ['capturar', '✍ Capturar'],
           ['premios', '💰 Premios'],
           ['configuracion', '⚙ Configuración'],
         ] as [Seccion, string][]).map(([k, label]) => (
@@ -53,6 +54,7 @@ export function Admin() {
       {seccion === 'usuarios' && <AdminUsuarios />}
       {seccion === 'pagos' && <AdminPagos />}
       {seccion === 'reporte' && <AdminReporte />}
+      {seccion === 'capturar' && <AdminCapturar />}
       {seccion === 'premios' && <AdminPremios />}
       {seccion === 'configuracion' && <AdminConfiguracion />}
     </div>
@@ -2025,6 +2027,167 @@ function AdminReporte() {
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+// ============================================================================
+// ADMIN: CAPTURAR pronósticos a nombre de un usuario
+// ============================================================================
+function AdminCapturar() {
+  const [usuarios, setUsuarios] = useState<Profile[]>([]);
+  const [userSel, setUserSel] = useState<string>('');
+  const [fases, setFases] = useState<Fase[]>([]);
+  const [faseSel, setFaseSel] = useState<string>('');
+  const [partidos, setPartidos] = useState<Partido[]>([]);
+  const [edits, setEdits] = useState<Record<string, { local: string; visit: string }>>({});
+  const [msg, setMsg] = useState<{ tipo: 'ok' | 'err'; texto: string } | null>(null);
+  const [guardando, setGuardando] = useState(false);
+  const [filtroUser, setFiltroUser] = useState('');
+
+  useEffect(() => {
+    (async () => {
+      const { data: us } = await supabase.from('profiles').select('*').eq('rol', 'jugador').order('nombre_completo');
+      setUsuarios((us ?? []) as Profile[]);
+      const { data: fs } = await supabase.from('fases').select('*').order('orden');
+      setFases((fs ?? []) as Fase[]);
+    })();
+  }, []);
+
+  // Cargar partidos de la fase y los pronósticos actuales del usuario
+  useEffect(() => {
+    if (!faseSel || !userSel) { setPartidos([]); setEdits({}); return; }
+    (async () => {
+      const { data: pts } = await supabase.from('partidos').select('*')
+        .eq('fase_id', faseSel).order('numero');
+      const arr = (pts ?? []) as Partido[];
+      setPartidos(arr);
+      const ids = arr.map(p => p.id);
+      const { data: pron } = await supabase.from('pronosticos_partido')
+        .select('partido_id, goles_local, goles_visitante')
+        .eq('user_id', userSel).in('partido_id', ids);
+      const m: Record<string, { local: string; visit: string }> = {};
+      (pron ?? []).forEach((p: any) => {
+        m[p.partido_id] = { local: String(p.goles_local), visit: String(p.goles_visitante) };
+      });
+      setEdits(m);
+    })();
+  }, [faseSel, userSel]);
+
+  const guardarUno = async (partidoId: string) => {
+    setMsg(null);
+    const e = edits[partidoId];
+    if (!e || e.local === '' || e.visit === '') {
+      setMsg({ tipo: 'err', texto: 'Escribe ambos marcadores.' });
+      return;
+    }
+    const gl = parseInt(e.local, 10), gv = parseInt(e.visit, 10);
+    if (isNaN(gl) || isNaN(gv) || gl < 0 || gv < 0) {
+      setMsg({ tipo: 'err', texto: 'Marcadores inválidos.' });
+      return;
+    }
+    setGuardando(true);
+    // upsert: si ya existe lo actualiza, si no lo crea
+    const { error } = await supabase.from('pronosticos_partido')
+      .upsert({ user_id: userSel, partido_id: partidoId, goles_local: gl, goles_visitante: gv },
+              { onConflict: 'user_id,partido_id' });
+    setGuardando(false);
+    if (error) setMsg({ tipo: 'err', texto: error.message });
+    else setMsg({ tipo: 'ok', texto: '✓ Marcador guardado.' });
+  };
+
+  const guardarTodos = async () => {
+    setMsg(null);
+    setGuardando(true);
+    const filas = partidos
+      .filter(p => edits[p.id] && edits[p.id].local !== '' && edits[p.id].visit !== '')
+      .map(p => ({
+        user_id: userSel,
+        partido_id: p.id,
+        goles_local: parseInt(edits[p.id].local, 10),
+        goles_visitante: parseInt(edits[p.id].visit, 10),
+      }))
+      .filter(f => !isNaN(f.goles_local) && !isNaN(f.goles_visitante));
+    if (filas.length === 0) {
+      setGuardando(false);
+      setMsg({ tipo: 'err', texto: 'No hay marcadores para guardar.' });
+      return;
+    }
+    const { error } = await supabase.from('pronosticos_partido')
+      .upsert(filas, { onConflict: 'user_id,partido_id' });
+    setGuardando(false);
+    if (error) setMsg({ tipo: 'err', texto: error.message });
+    else setMsg({ tipo: 'ok', texto: `✓ ${filas.length} marcadores guardados.` });
+  };
+
+  const usuariosFiltrados = filtroUser.trim() === '' ? usuarios
+    : usuarios.filter(u => u.nombre_completo.toLowerCase().includes(filtroUser.toLowerCase()));
+  const nombreSel = usuarios.find(u => u.id === userSel)?.nombre_completo ?? '';
+
+  return (
+    <div className="space-y-4">
+      {msg && <div className={`p-2 rounded text-sm ${msg.tipo === 'ok' ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>{msg.texto}</div>}
+
+      <div className="card p-4">
+        <h3 className="font-display text-xl mb-2">✍ Capturar pronósticos por un jugador</h3>
+        <p className="text-xs text-ink-700 mb-3">
+          Ingresa o corrige los marcadores a nombre de un jugador. Como admin, puedes hacerlo
+          aunque la fase esté cerrada. Usa el upsert: si ya tenía marcador lo actualiza, si no lo crea.
+        </p>
+        <div className="grid sm:grid-cols-2 gap-3">
+          <div>
+            <label className="label">Buscar jugador</label>
+            <input className="input mb-2" placeholder="🔍 Nombre…" value={filtroUser}
+              onChange={e => setFiltroUser(e.target.value)} />
+            <select className="input" value={userSel} onChange={e => setUserSel(e.target.value)}>
+              <option value="">— Elige un jugador —</option>
+              {usuariosFiltrados.map(u => <option key={u.id} value={u.id}>{u.nombre_completo}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="label">Fase</label>
+            <select className="input" value={faseSel} onChange={e => setFaseSel(e.target.value)}>
+              <option value="">— Elige una fase —</option>
+              {fases.map(f => <option key={f.id} value={f.id}>{f.nombre}</option>)}
+            </select>
+          </div>
+        </div>
+      </div>
+
+      {userSel && faseSel && partidos.length > 0 && (
+        <div className="card p-4">
+          <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+            <h4 className="font-display text-lg">Marcadores de {nombreSel}</h4>
+            <button className="btn-accent text-sm" onClick={guardarTodos} disabled={guardando}>
+              {guardando ? 'Guardando…' : 'Guardar todos'}
+            </button>
+          </div>
+          <div className="space-y-2">
+            {partidos.map(p => (
+              <div key={p.id} className="grid grid-cols-12 gap-2 items-center py-1 border-b border-pitch-100 last:border-0">
+                <div className="col-span-5 text-right text-sm font-semibold">{p.equipo_local}</div>
+                <div className="col-span-2 flex items-center justify-center gap-1">
+                  <input type="number" min={0} className="input w-12 text-center px-1 py-1"
+                    value={edits[p.id]?.local ?? ''}
+                    onChange={ev => setEdits(s => ({ ...s, [p.id]: { ...s[p.id], local: ev.target.value, visit: s[p.id]?.visit ?? '' } }))} />
+                  <span>–</span>
+                  <input type="number" min={0} className="input w-12 text-center px-1 py-1"
+                    value={edits[p.id]?.visit ?? ''}
+                    onChange={ev => setEdits(s => ({ ...s, [p.id]: { ...s[p.id], visit: ev.target.value, local: s[p.id]?.local ?? '' } }))} />
+                </div>
+                <div className="col-span-3 text-sm font-semibold">{p.equipo_visitante}</div>
+                <div className="col-span-2 text-right">
+                  <button className="btn-ghost text-xs" onClick={() => guardarUno(p.id)}>Guardar</button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {userSel && faseSel && partidos.length === 0 && (
+        <div className="card p-4 text-sm text-ink-700">Esta fase no tiene partidos cargados.</div>
+      )}
     </div>
   );
 }

@@ -10,7 +10,7 @@ interface PartidoConPronostico extends Partido {
 }
 
 export function MisPronosticos() {
-  const { user } = useAuthCtx();
+  const { user, profile } = useAuthCtx();
   const [fases, setFases] = useState<Fase[]>([]);
   const [grupos, setGrupos] = useState<Grupo[]>([]);
   const [partidos, setPartidos] = useState<PartidoConPronostico[]>([]);
@@ -133,8 +133,9 @@ export function MisPronosticos() {
     if (!faseActual) return;
     setMsg(null);
     const rows: any[] = [];
+    const puedeEditarExtra = profile?.puede_editar === true;
     for (const p of partidos) {
-      if (estaCerrado(p.cierre_pronostico ?? faseActual.fecha_cierre)) continue;
+      if (!puedeEditarExtra && estaCerrado(p.cierre_pronostico ?? faseActual.fecha_cierre)) continue;
       const e = edits[p.id];
       if (!e || e.local === '' || e.visit === '') continue;
       const gl = parseInt(e.local, 10);
@@ -166,8 +167,9 @@ export function MisPronosticos() {
   if (loading) return <div className="text-center py-12 text-pitch-700">Cargando partidos…</div>;
 
   const cierreEfectivoFase = faseActual?.fecha_cierre ?? null;
-  const faseCerrada = estaCerrado(cierreEfectivoFase);
-  const faseNoAbierta = antesDeAbrir(faseActual?.fecha_apertura ?? null);
+  const puedeEditarExtra = profile?.puede_editar === true;
+  const faseCerrada = !puedeEditarExtra && estaCerrado(cierreEfectivoFase);
+  const faseNoAbierta = !puedeEditarExtra && antesDeAbrir(faseActual?.fecha_apertura ?? null);
 
   return (
     <div className="space-y-4">
@@ -293,9 +295,10 @@ export function MisPronosticos() {
 
   function renderPartido(p: PartidoConPronostico) {
     const cierreP = p.cierre_pronostico ?? faseActual?.fecha_cierre ?? null;
-    // Bloqueado si: aún no abre la fase, O ya pasó el cierre
+    // Bloqueado si: aún no abre la fase, O ya pasó el cierre.
+    // EXCEPCIÓN: si el jugador tiene permiso de edición extra, nunca se bloquea.
     const noHaAbierto = antesDeAbrir(faseActual?.fecha_apertura ?? null);
-    const pCerrado = noHaAbierto || estaCerrado(cierreP);
+    const pCerrado = !puedeEditarExtra && (noHaAbierto || estaCerrado(cierreP));
     const tieneResultado = p.goles_local_oficial !== null && p.goles_visitante_oficial !== null;
     const e = edits[p.id] ?? { local: '', visit: '' };
 
