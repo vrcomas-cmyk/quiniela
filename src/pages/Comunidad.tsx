@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { Fase, Partido, Profile, PronosticoPartido } from '../types';
 import { fmtFechaCorta, estaCerrado } from '../lib/fechas';
+import { nombresCortos } from '../lib/nombresCortos';
 
 interface CelaCell {
   goles_local: number;
@@ -89,6 +90,11 @@ export function Comunidad() {
 
   const fase = fases.find(f => f.id === faseSel);
 
+  // Nombres cortos únicos para los encabezados (solo display, no toca la base)
+  const nombresMap = nombresCortos(
+    jugadores.map(j => ({ id: j.id, nombre_completo: j.nombre_completo, email: (j as any).email }))
+  );
+
   return (
     <div className="space-y-4">
       <div className="card p-4">
@@ -126,7 +132,7 @@ export function Comunidad() {
                 <th className="text-center px-2 py-2">Oficial</th>
                 {jugadores.map(j => (
                   <th key={j.id} className="text-center px-2 py-2 whitespace-nowrap">
-                    {j.nombre_completo.split(' ')[0]}
+                    {nombresMap[j.id] ?? j.nombre_completo.split(' ')[0]}
                   </th>
                 ))}
               </tr>
