@@ -1074,12 +1074,20 @@ Pedro Sánchez Ruiz,pedro@empresa.com`}</pre>
 // ADMIN: USUARIOS (con botón eliminar)
 // ============================================================================
 function AdminUsuarios() {
-  const [users, setUsers] = useState<Profile[]>([]);
+  const [users, setUsers] = useState<any[]>([]);
   const [msg, setMsg] = useState<{ tipo: 'ok' | 'err'; texto: string } | null>(null);
+  const [busqueda, setBusqueda] = useState('');
 
   const cargar = async () => {
-    const { data } = await supabase.from('profiles').select('*').order('nombre_completo');
-    setUsers((data ?? []) as Profile[]);
+    // detalle_usuarios trae email + conteos (función de migración 10).
+    const { data, error } = await supabase.rpc('detalle_usuarios');
+    if (error || !data) {
+      // Fallback: si la función no existe aún, usar profiles (sin email)
+      const { data: prof } = await supabase.from('profiles').select('*').order('nombre_completo');
+      setUsers((prof ?? []) as any[]);
+    } else {
+      setUsers(data as any[]);
+    }
   };
   useEffect(() => { cargar(); }, []);
 
@@ -1134,16 +1142,31 @@ function AdminUsuarios() {
     }
   };
 
+  const usuariosFiltrados = busqueda.trim() === '' ? users
+    : users.filter(u =>
+        (u.nombre_completo ?? '').toLowerCase().includes(busqueda.toLowerCase()) ||
+        (u.email ?? '').toLowerCase().includes(busqueda.toLowerCase())
+      );
+
   return (
     <div className="space-y-3">
       {msg && <div className={`p-2 rounded text-sm ${
         msg.tipo === 'ok' ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'
       }`}>{msg.texto}</div>}
+
+      <div className="card p-3">
+        <input className="input" placeholder="🔍 Buscar por nombre o correo (útil para hallar duplicados)…"
+          value={busqueda} onChange={e => setBusqueda(e.target.value)} />
+        <div className="text-xs text-ink-700 mt-1">{usuariosFiltrados.length} usuario(s)</div>
+      </div>
+
       <div className="card overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="bg-pitch-50 text-pitch-700">
             <tr>
               <th className="text-left px-3 py-2">Nombre</th>
+              <th className="text-left px-3 py-2">Correo</th>
+              <th className="text-center px-3 py-2" title="Pronósticos de partido / Clasificación">Pronós. (P/C)</th>
               <th className="text-left px-3 py-2">Rol</th>
               <th className="text-center px-3 py-2">Pagado</th>
               <th className="text-center px-3 py-2">Edición extra</th>
@@ -1152,9 +1175,15 @@ function AdminUsuarios() {
             </tr>
           </thead>
           <tbody>
-            {users.map(u => (
+            {usuariosFiltrados.map(u => (
               <tr key={u.id} className="border-t border-pitch-100">
                 <td className="px-3 py-2 font-semibold">{u.nombre_completo}</td>
+                <td className="px-3 py-2 text-xs text-ink-700">{u.email ?? '—'}</td>
+                <td className="px-3 py-2 text-center font-mono text-xs">
+                  <span title="Pronósticos de partido">{u.pronosticos_partido ?? '—'}</span>
+                  {' / '}
+                  <span title="Pronósticos de clasificación">{u.pronosticos_clasificacion ?? '—'}</span>
+                </td>
                 <td className="px-3 py-2">
                   <span className={`badge ${u.rol === 'admin' ? 'bg-fire-500 text-white' : 'bg-pitch-50 text-pitch-700'}`}>
                     {u.rol}
@@ -2035,6 +2064,27 @@ function AdminReporte() {
 // ADMIN: CAPTURAR pronósticos a nombre de un usuario
 // ============================================================================
 function AdminCapturar() {
+  const [modo, setModo] = useState<'partidos' | 'clasificacion'>('partidos');
+  return (
+    <div className="space-y-3">
+      <div className="card p-3">
+        <div className="flex gap-2">
+          <button onClick={() => setModo('partidos')}
+            className={`px-3 py-1.5 rounded-md text-sm font-semibold ${modo === 'partidos' ? 'bg-pitch-600 text-white' : 'bg-pitch-50 text-pitch-700'}`}>
+            Marcadores de partidos
+          </button>
+          <button onClick={() => setModo('clasificacion')}
+            className={`px-3 py-1.5 rounded-md text-sm font-semibold ${modo === 'clasificacion' ? 'bg-pitch-600 text-white' : 'bg-pitch-50 text-pitch-700'}`}>
+            Clasificación
+          </button>
+        </div>
+      </div>
+      {modo === 'partidos' ? <AdminCapturarPartidos /> : <AdminCapturarClasificacion />}
+    </div>
+  );
+}
+
+function AdminCapturarPartidos() {
   const [usuarios, setUsuarios] = useState<Profile[]>([]);
   const [userSel, setUserSel] = useState<string>('');
   const [fases, setFases] = useState<Fase[]>([]);
@@ -2187,6 +2237,177 @@ function AdminCapturar() {
 
       {userSel && faseSel && partidos.length === 0 && (
         <div className="card p-4 text-sm text-ink-700">Esta fase no tiene partidos cargados.</div>
+      )}
+    </div>
+  );
+}
+
+// ============================================================================
+// ADMIN: CAPTURAR CLASIFICACIÓN a nombre de un usuario
+// ============================================================================
+function AdminCapturarClasificacion() {
+  const [usuarios, setUsuarios] = useState<Profile[]>([]);
+  const [userSel, setUserSel] = useState<string>('');
+  const [filtroUser, setFiltroUser] = useState('');
+  const [grupos, setGrupos] = useState<any[]>([]);
+  const [equiposGrupo, setEquiposGrupo] = useState<Record<string, string[]>>({});
+  const [todosEquipos, setTodosEquipos] = useState<string[]>([]);
+  const [clasifGrupo, setClasifGrupo] = useState<Record<string, { p1: string; p2: string }>>({});
+  const [terceros, setTerceros] = useState<string[]>(new Array(8).fill(''));
+  const [top4, setTop4] = useState<string[]>(new Array(4).fill(''));
+  const [msg, setMsg] = useState<{ tipo: 'ok' | 'err'; texto: string } | null>(null);
+  const [guardando, setGuardando] = useState(false);
+
+  // Cargar usuarios, grupos y equipos
+  useEffect(() => {
+    (async () => {
+      const { data: us } = await supabase.from('profiles').select('*').eq('rol', 'jugador').order('nombre_completo');
+      setUsuarios((us ?? []) as Profile[]);
+      const { data: gs } = await supabase.from('grupos').select('*').order('codigo');
+      setGrupos(gs ?? []);
+      const { data: pts } = await supabase.from('partidos').select('equipo_local, equipo_visitante, grupo_id');
+      const setEq = new Set<string>();
+      const porGrupo: Record<string, Set<string>> = {};
+      (pts ?? []).forEach((p: any) => {
+        setEq.add(p.equipo_local); setEq.add(p.equipo_visitante);
+        if (p.grupo_id) {
+          if (!porGrupo[p.grupo_id]) porGrupo[p.grupo_id] = new Set();
+          porGrupo[p.grupo_id].add(p.equipo_local);
+          porGrupo[p.grupo_id].add(p.equipo_visitante);
+        }
+      });
+      setTodosEquipos(Array.from(setEq).sort());
+      const m: Record<string, string[]> = {};
+      Object.entries(porGrupo).forEach(([g, s]) => { m[g] = Array.from(s).sort(); });
+      setEquiposGrupo(m);
+    })();
+  }, []);
+
+  // Cargar la clasificación actual del usuario seleccionado
+  useEffect(() => {
+    if (!userSel) { setClasifGrupo({}); setTerceros(new Array(8).fill('')); setTop4(new Array(4).fill('')); return; }
+    (async () => {
+      const { data } = await supabase.from('pronosticos_clasificacion').select('*').eq('user_id', userSel);
+      const arr = data ?? [];
+      const cg: Record<string, { p1: string; p2: string }> = {};
+      grupos.forEach((g: any) => {
+        const p1 = arr.find((x: any) => x.tipo === 'clasif_grupo' && x.grupo_id === g.id && x.posicion === 1)?.equipo ?? '';
+        const p2 = arr.find((x: any) => x.tipo === 'clasif_grupo' && x.grupo_id === g.id && x.posicion === 2)?.equipo ?? '';
+        cg[g.id] = { p1, p2 };
+      });
+      setClasifGrupo(cg);
+      const ts = new Array(8).fill('');
+      arr.filter((x: any) => x.tipo === 'tercero').slice(0, 8).forEach((x: any, i: number) => { ts[i] = x.equipo; });
+      setTerceros(ts);
+      const t4 = new Array(4).fill('');
+      [1, 2, 3, 4].forEach(pos => {
+        const x = arr.find((y: any) => y.tipo === 'top4' && y.posicion === pos);
+        if (x) t4[pos - 1] = x.equipo;
+      });
+      setTop4(t4);
+    })();
+  }, [userSel, grupos]);
+
+  const guardar = async () => {
+    if (!userSel) { setMsg({ tipo: 'err', texto: 'Elige un jugador.' }); return; }
+    setGuardando(true);
+    setMsg(null);
+    // Borrar lo previo del usuario y reinsertar (igual que en la pantalla del jugador)
+    await supabase.from('pronosticos_clasificacion').delete().eq('user_id', userSel);
+    const rows: any[] = [];
+    Object.entries(clasifGrupo).forEach(([grupoId, val]) => {
+      if (val.p1) rows.push({ user_id: userSel, tipo: 'clasif_grupo', grupo_id: grupoId, posicion: 1, equipo: val.p1 });
+      if (val.p2) rows.push({ user_id: userSel, tipo: 'clasif_grupo', grupo_id: grupoId, posicion: 2, equipo: val.p2 });
+    });
+    terceros.forEach((eq) => { if (eq) rows.push({ user_id: userSel, tipo: 'tercero', equipo: eq }); });
+    top4.forEach((eq, i) => { if (eq) rows.push({ user_id: userSel, tipo: 'top4', posicion: i + 1, equipo: eq }); });
+    if (rows.length === 0) { setGuardando(false); setMsg({ tipo: 'err', texto: 'No hay nada para guardar.' }); return; }
+    const { error } = await supabase.from('pronosticos_clasificacion').insert(rows);
+    setGuardando(false);
+    if (error) setMsg({ tipo: 'err', texto: `Error: ${error.message}` });
+    else setMsg({ tipo: 'ok', texto: `✓ Guardadas ${rows.length} selecciones de ${usuarios.find(u => u.id === userSel)?.nombre_completo}.` });
+  };
+
+  const usuariosFiltrados = filtroUser.trim() === '' ? usuarios
+    : usuarios.filter(u => u.nombre_completo.toLowerCase().includes(filtroUser.toLowerCase()));
+  const eqGrupo = (gid: string) => equiposGrupo[gid] ?? [];
+
+  return (
+    <div className="space-y-4">
+      {msg && <div className={`p-2 rounded text-sm ${msg.tipo === 'ok' ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>{msg.texto}</div>}
+
+      <div className="card p-4">
+        <h3 className="font-display text-xl mb-2">✍ Capturar Clasificación por un jugador</h3>
+        <p className="text-xs text-ink-700 mb-3">
+          Llena la clasificación a nombre de un jugador (1°/2° por grupo, 8 terceros, top 4).
+          Como admin puedes hacerlo aunque esté cerrado. Al guardar se reemplaza su clasificación completa.
+        </p>
+        <label className="label">Buscar jugador</label>
+        <input className="input mb-2" placeholder="🔍 Nombre…" value={filtroUser} onChange={e => setFiltroUser(e.target.value)} />
+        <select className="input" value={userSel} onChange={e => setUserSel(e.target.value)}>
+          <option value="">— Elige un jugador —</option>
+          {usuariosFiltrados.map(u => <option key={u.id} value={u.id}>{u.nombre_completo}</option>)}
+        </select>
+      </div>
+
+      {userSel && (
+        <>
+          <div className="card p-4">
+            <h4 className="font-display text-lg text-pitch-700 mb-3">1° y 2° de cada grupo</h4>
+            <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
+              {grupos.map((g: any) => (
+                <div key={g.id} className="border border-pitch-100 rounded-lg p-3">
+                  <div className="font-display text-pitch-700 mb-2">Grupo {g.codigo}</div>
+                  <label className="label">1° lugar</label>
+                  <select className="input mb-2" value={clasifGrupo[g.id]?.p1 ?? ''}
+                    onChange={e => setClasifGrupo(s => ({ ...s, [g.id]: { ...s[g.id], p1: e.target.value, p2: s[g.id]?.p2 ?? '' } }))}>
+                    <option value="">—</option>
+                    {eqGrupo(g.id).map(eq => <option key={eq} value={eq}>{eq}</option>)}
+                  </select>
+                  <label className="label">2° lugar</label>
+                  <select className="input" value={clasifGrupo[g.id]?.p2 ?? ''}
+                    onChange={e => setClasifGrupo(s => ({ ...s, [g.id]: { ...s[g.id], p2: e.target.value, p1: s[g.id]?.p1 ?? '' } }))}>
+                    <option value="">—</option>
+                    {eqGrupo(g.id).map(eq => <option key={eq} value={eq}>{eq}</option>)}
+                  </select>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="card p-4">
+            <h4 className="font-display text-lg text-pitch-700 mb-3">Los 8 mejores terceros</h4>
+            <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-2">
+              {terceros.map((eq, i) => (
+                <select key={i} className="input" value={eq}
+                  onChange={e => { const v = [...terceros]; v[i] = e.target.value; setTerceros(v); }}>
+                  <option value="">— Tercero {i + 1} —</option>
+                  {todosEquipos.map(t => <option key={t} value={t}>{t}</option>)}
+                </select>
+              ))}
+            </div>
+          </div>
+
+          <div className="card p-4">
+            <h4 className="font-display text-lg text-pitch-700 mb-3">Top 4 final</h4>
+            <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-2">
+              {['Campeón', 'Subcampeón', '3er lugar', '4° lugar'].map((lbl, i) => (
+                <div key={i}>
+                  <label className="label">{lbl}</label>
+                  <select className="input" value={top4[i]}
+                    onChange={e => { const v = [...top4]; v[i] = e.target.value; setTop4(v); }}>
+                    <option value="">—</option>
+                    {todosEquipos.map(t => <option key={t} value={t}>{t}</option>)}
+                  </select>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <button className="btn-accent w-full" onClick={guardar} disabled={guardando}>
+            {guardando ? 'Guardando…' : 'Guardar clasificación del jugador'}
+          </button>
+        </>
       )}
     </div>
   );

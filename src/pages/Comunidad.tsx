@@ -33,7 +33,7 @@ export function Comunidad() {
     (async () => {
       setLoading(true);
       const { data: pData } = await supabase
-        .from('partidos').select('*').eq('fase_id', faseSel).order('numero');
+        .from('partidos').select('*').eq('fase_id', faseSel).order('fecha_partido', { nullsFirst: false }).order('numero');
       const partidosArr = (pData ?? []) as Partido[];
       setPartidos(partidosArr);
 
@@ -124,14 +124,17 @@ export function Comunidad() {
       {loading && <div className="text-center py-8 text-pitch-700">Cargando…</div>}
 
       {!loading && partidos.length > 0 && (
-        <div className="card overflow-x-auto">
-          <table className="w-full text-xs">
-            <thead className="bg-pitch-50 text-pitch-700 sticky top-0">
+        <div className="card overflow-auto" style={{ maxHeight: '75vh' }}>
+          <table className="w-full text-xs border-separate" style={{ borderSpacing: 0 }}>
+            <thead>
               <tr>
-                <th className="text-left px-3 py-2 whitespace-nowrap">Partido</th>
-                <th className="text-center px-2 py-2">Oficial</th>
+                <th className="text-left px-3 py-2 whitespace-nowrap sticky left-0 top-0 z-30 bg-pitch-100 text-pitch-700"
+                    style={{ minWidth: 140 }}>
+                  Partido
+                </th>
+                <th className="text-center px-2 py-2 sticky top-0 z-20 bg-pitch-50 text-pitch-700">Oficial</th>
                 {jugadores.map(j => (
-                  <th key={j.id} className="text-center px-2 py-2 whitespace-nowrap">
+                  <th key={j.id} className="text-center px-2 py-2 whitespace-nowrap sticky top-0 z-20 bg-pitch-50 text-pitch-700">
                     {nombresMap[j.id] ?? j.nombre_completo.split(' ')[0]}
                   </th>
                 ))}
@@ -142,25 +145,25 @@ export function Comunidad() {
                 const cierreP = p.cierre_pronostico ?? fase?.fecha_cierre ?? null;
                 const cerrado = estaCerrado(cierreP);
                 return (
-                  <tr key={p.id} className="border-t border-pitch-100">
-                    <td className="px-3 py-2">
+                  <tr key={p.id}>
+                    <td className="px-3 py-2 sticky left-0 z-10 bg-white border-t border-pitch-100" style={{ minWidth: 140 }}>
                       <div className="font-semibold">{p.equipo_local} vs {p.equipo_visitante}</div>
                       <div className="text-[10px] text-ink-700">{fmtFechaCorta(p.fecha_partido)}</div>
                     </td>
-                    <td className="px-2 py-2 text-center font-mono">
+                    <td className="px-2 py-2 text-center font-mono border-t border-pitch-100">
                       {p.goles_local_oficial !== null && p.goles_visitante_oficial !== null
                         ? `${p.goles_local_oficial}–${p.goles_visitante_oficial}`
                         : '—'}
                     </td>
                     {jugadores.map(j => {
                       if (!cerrado) {
-                        return <td key={j.id} className="px-2 py-2 text-center text-gray-400">🔒</td>;
+                        return <td key={j.id} className="px-2 py-2 text-center text-gray-400 border-t border-pitch-100">🔒</td>;
                       }
                       const c = matriz[p.id]?.[j.id];
-                      if (!c) return <td key={j.id} className="px-2 py-2 text-center text-gray-300">—</td>;
+                      if (!c) return <td key={j.id} className="px-2 py-2 text-center text-gray-300 border-t border-pitch-100">—</td>;
                       const acerto = c.puntos > 0;
                       return (
-                        <td key={j.id} className={`px-2 py-2 text-center font-mono ${
+                        <td key={j.id} className={`px-2 py-2 text-center font-mono border-t border-pitch-100 ${
                           acerto ? 'bg-fire-500/10 text-pitch-700 font-bold' : ''
                         }`}>
                           {c.goles_local}–{c.goles_visitante}
