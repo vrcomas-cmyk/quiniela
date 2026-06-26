@@ -9,7 +9,7 @@ import { MisPronosticos } from './pages/MisPronosticos';
 import { Clasificacion } from './pages/Clasificacion';
 import { Ranking } from './pages/Ranking';
 import { Comunidad } from './pages/Comunidad';
-import { Chat } from './pages/Chat';
+import { Proyeccion } from './pages/Proyeccion';
 import { Admin } from './pages/Admin';
 
 export function App() {
@@ -31,7 +31,7 @@ export function App() {
             <Route path="/clasificacion" element={<Clasificacion />} />
             <Route path="/ranking" element={<Ranking />} />
             <Route path="/comunidad" element={<Comunidad />} />
-            <Route path="/chat" element={<Chat />} />
+            <Route path="/proyeccion" element={<Proyeccion />} />
             <Route
               path="/admin"
               element={

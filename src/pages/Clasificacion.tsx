@@ -5,6 +5,7 @@ import { useAuthCtx } from '../hooks/AuthContext';
 import { Countdown } from '../components/Countdown';
 import { estaCerrado, antesDeAbrir } from '../lib/fechas';
 
+
 const POSICIONES_FINALES = ['Campeón', 'Subcampeón', '3er Lugar', '4to Lugar'];
 
 export function Clasificacion() {
@@ -13,7 +14,6 @@ export function Clasificacion() {
   const [grupos, setGrupos] = useState<Grupo[]>([]);
   const [pronos, setPronos] = useState<PronosticoClasificacion[]>([]);
   const [todosEquipos, setTodosEquipos] = useState<string[]>([]);
-  const [equiposGrupo, setEquiposGrupo] = useState<Record<string, string[]>>({});
   const [loading, setLoading] = useState(true);
   const [msg, setMsg] = useState<{ tipo: 'ok' | 'err'; texto: string } | null>(null);
 
@@ -21,41 +21,24 @@ export function Clasificacion() {
   const [clasifGrupo, setClasifGrupo] = useState<Record<string, { p1: string; p2: string }>>({});
   const [terceros, setTerceros] = useState<string[]>(new Array(8).fill(''));
   const [top4, setTop4] = useState<string[]>(new Array(4).fill(''));
-  const [cierreClasif, setCierreClasif] = useState<string | null>(null);
 
   const cargar = async () => {
     setLoading(true);
-    const [fasesRes, gruposRes, partidosRes, cfgRes] = await Promise.all([
+    const [fasesRes, gruposRes, partidosRes] = await Promise.all([
       supabase.from('fases').select('*').eq('codigo', 'grupos').single(),
       supabase.from('grupos').select('*').order('codigo'),
       supabase.from('partidos').select('equipo_local, equipo_visitante, grupo_id'),
-      supabase.from('configuracion').select('valor').eq('clave', 'cierre_clasificacion').maybeSingle(),
     ]);
     setFaseGrupos(fasesRes.data as Fase);
     setGrupos((gruposRes.data ?? []) as Grupo[]);
-    // Cierre propio de clasificación (si está configurado y no vacío)
-    const valCierre = (cfgRes.data?.valor ?? '').trim();
-    setCierreClasif(valCierre !== '' ? valCierre : null);
 
     // Extraer todos los equipos únicos del torneo (de los partidos de fase de grupos)
     const setEq = new Set<string>();
-    // Y agrupar equipos por su grupo_id
-    const porGrupo: Record<string, Set<string>> = {};
     (partidosRes.data ?? []).forEach((p: any) => {
       setEq.add(p.equipo_local);
       setEq.add(p.equipo_visitante);
-      if (p.grupo_id) {
-        if (!porGrupo[p.grupo_id]) porGrupo[p.grupo_id] = new Set<string>();
-        porGrupo[p.grupo_id].add(p.equipo_local);
-        porGrupo[p.grupo_id].add(p.equipo_visitante);
-      }
     });
     setTodosEquipos(Array.from(setEq).sort());
-    const mapaGrupo: Record<string, string[]> = {};
-    Object.entries(porGrupo).forEach(([gid, set]) => {
-      mapaGrupo[gid] = Array.from(set).sort();
-    });
-    setEquiposGrupo(mapaGrupo);
 
     if (user) {
       const { data: pronosData } = await supabase
@@ -91,9 +74,8 @@ export function Clasificacion() {
   useEffect(() => { cargar(); }, [user]);
 
   const equiposPorGrupo = (grupoId: string): string[] => {
-    // Solo los equipos que pertenecen a ese grupo (según los partidos cargados).
-    // Si aún no hay partidos de ese grupo, no mostramos opciones.
-    return equiposGrupo[grupoId] ?? [];
+    // Aquí podríamos filtrar equipos por grupo, pero al inicio usamos todos
+    return todosEquipos;
   };
 
   const guardar = async () => {
@@ -105,10 +87,8 @@ export function Clasificacion() {
       setMsg({ tipo: 'err', texto: 'Los pronósticos de clasificación todavía no abren.' });
       return;
     }
-    // El cierre de clasificación puede ser propio (config) o el de grupos
-    const cierreEfectivo = cierreClasif ?? faseGrupos.fecha_cierre;
-    if (estaCerrado(cierreEfectivo)) {
-      setMsg({ tipo: 'err', texto: 'Los pronósticos de clasificación ya cerraron.' });
+    if (estaCerrado(faseGrupos.fecha_cierre)) {
+      setMsg({ tipo: 'err', texto: 'La fase ya está cerrada.' });
       return;
     }
 
@@ -150,10 +130,8 @@ export function Clasificacion() {
   if (loading) return <div className="text-center py-12 text-pitch-700">Cargando…</div>;
 
   const noAbierta = antesDeAbrir(faseGrupos?.fecha_apertura ?? null);
-  // Cierre efectivo: la fecha propia de clasificación si existe, si no la de grupos
-  const cierreEfectivoClasif = cierreClasif ?? faseGrupos?.fecha_cierre ?? null;
   // "bloqueada" = no se puede editar (ni antes de abrir, ni después de cerrar)
-  const cerrada = noAbierta || estaCerrado(cierreEfectivoClasif);
+  const cerrada = noAbierta || estaCerrado(faseGrupos?.fecha_cierre ?? null);
 
   return (
     <div className="space-y-4">
@@ -174,8 +152,8 @@ export function Clasificacion() {
               </div>
             </div>
           )}
-          {!noAbierta && !cerrada && cierreEfectivoClasif && (
-            <Countdown fechaCierre={cierreEfectivoClasif} />
+          {!noAbierta && !cerrada && faseGrupos?.fecha_cierre && (
+            <Countdown fechaCierre={faseGrupos.fecha_cierre} />
           )}
           {!noAbierta && cerrada && <span className="badge-closed">CERRADA</span>}
         </div>

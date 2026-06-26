@@ -4,13 +4,14 @@ import { Fase, Grupo, Partido, PronosticoPartido } from '../types';
 import { useAuthCtx } from '../hooks/AuthContext';
 import { Countdown } from '../components/Countdown';
 import { fmtFechaCorta, estaCerrado, antesDeAbrir } from '../lib/fechas';
+import { Bandera } from '../lib/banderas';
 
 interface PartidoConPronostico extends Partido {
   pronostico?: PronosticoPartido;
 }
 
 export function MisPronosticos() {
-  const { user, profile } = useAuthCtx();
+  const { user } = useAuthCtx();
   const [fases, setFases] = useState<Fase[]>([]);
   const [grupos, setGrupos] = useState<Grupo[]>([]);
   const [partidos, setPartidos] = useState<PartidoConPronostico[]>([]);
@@ -133,9 +134,8 @@ export function MisPronosticos() {
     if (!faseActual) return;
     setMsg(null);
     const rows: any[] = [];
-    const puedeEditarExtra = profile?.puede_editar === true;
     for (const p of partidos) {
-      if (!puedeEditarExtra && estaCerrado(p.cierre_pronostico ?? faseActual.fecha_cierre)) continue;
+      if (estaCerrado(p.cierre_pronostico ?? faseActual.fecha_cierre)) continue;
       const e = edits[p.id];
       if (!e || e.local === '' || e.visit === '') continue;
       const gl = parseInt(e.local, 10);
@@ -167,9 +167,8 @@ export function MisPronosticos() {
   if (loading) return <div className="text-center py-12 text-pitch-700">Cargando partidos…</div>;
 
   const cierreEfectivoFase = faseActual?.fecha_cierre ?? null;
-  const puedeEditarExtra = profile?.puede_editar === true;
-  const faseCerrada = !puedeEditarExtra && estaCerrado(cierreEfectivoFase);
-  const faseNoAbierta = !puedeEditarExtra && antesDeAbrir(faseActual?.fecha_apertura ?? null);
+  const faseCerrada = estaCerrado(cierreEfectivoFase);
+  const faseNoAbierta = antesDeAbrir(faseActual?.fecha_apertura ?? null);
 
   return (
     <div className="space-y-4">
@@ -295,10 +294,9 @@ export function MisPronosticos() {
 
   function renderPartido(p: PartidoConPronostico) {
     const cierreP = p.cierre_pronostico ?? faseActual?.fecha_cierre ?? null;
-    // Bloqueado si: aún no abre la fase, O ya pasó el cierre.
-    // EXCEPCIÓN: si el jugador tiene permiso de edición extra, nunca se bloquea.
+    // Bloqueado si: aún no abre la fase, O ya pasó el cierre
     const noHaAbierto = antesDeAbrir(faseActual?.fecha_apertura ?? null);
-    const pCerrado = !puedeEditarExtra && (noHaAbierto || estaCerrado(cierreP));
+    const pCerrado = noHaAbierto || estaCerrado(cierreP);
     const tieneResultado = p.goles_local_oficial !== null && p.goles_visitante_oficial !== null;
     const e = edits[p.id] ?? { local: '', visit: '' };
 
@@ -311,7 +309,7 @@ export function MisPronosticos() {
         </div>
 
         <div className="col-span-5 sm:col-span-3 text-right">
-          <span className="font-semibold">{p.equipo_local}</span>
+          <span className="font-semibold"><Bandera equipo={p.equipo_local} /> {p.equipo_local}</span>
         </div>
 
         <div className="col-span-2 sm:col-span-3 flex items-center justify-center gap-1">
@@ -335,7 +333,7 @@ export function MisPronosticos() {
         </div>
 
         <div className="col-span-5 sm:col-span-2">
-          <span className="font-semibold">{p.equipo_visitante}</span>
+          <span className="font-semibold"><Bandera equipo={p.equipo_visitante} /> {p.equipo_visitante}</span>
         </div>
 
         <div className="col-span-12 sm:col-span-2 flex justify-end items-center gap-2">

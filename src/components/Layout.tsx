@@ -1,5 +1,6 @@
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { useAuthCtx } from '../hooks/AuthContext';
+import { ChatWidget } from './ChatWidget';
 
 export function Layout() {
   const { profile, isAdmin, signOut } = useAuthCtx();
@@ -40,7 +41,7 @@ export function Layout() {
               <NavLink to="/clasificacion" className={linkClass}>Clasificación</NavLink>
               <NavLink to="/ranking" className={linkClass}>Ranking</NavLink>
               <NavLink to="/comunidad" className={linkClass}>Comunidad</NavLink>
-              <NavLink to="/chat" className={linkClass}>💬 Chat</NavLink>
+              <NavLink to="/proyeccion" className={linkClass}>📊 Proyección</NavLink>
               {isAdmin && <NavLink to="/admin" className={linkClass}>Admin</NavLink>}
             </nav>
 
@@ -64,7 +65,7 @@ export function Layout() {
             <NavLink to="/clasificacion" className={linkClass}>Clasificación</NavLink>
             <NavLink to="/ranking" className={linkClass}>Ranking</NavLink>
             <NavLink to="/comunidad" className={linkClass}>Comunidad</NavLink>
-              <NavLink to="/chat" className={linkClass}>💬 Chat</NavLink>
+              <NavLink to="/proyeccion" className={linkClass}>📊 Proyección</NavLink>
             {isAdmin && <NavLink to="/admin" className={linkClass}>Admin</NavLink>}
           </nav>
         </div>
@@ -73,6 +74,8 @@ export function Layout() {
       <main className="max-w-7xl mx-auto px-4 py-6">
         <Outlet />
       </main>
+
+      <ChatWidget />
 
       <footer className="border-t border-pitch-100 py-6 text-center text-xs text-ink-700">
         Quiniela Mundial 2026 · DEGASA · 23º Mundial de la historia
