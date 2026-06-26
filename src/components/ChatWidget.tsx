@@ -31,7 +31,7 @@ export function ChatWidget() {
       >
         💬
         {noLeidos > 0 && (
-          <span className="absolute -top-1 -right-1 bg-fire-500 text-white text-xs rounded-full min-w-[20px] h-5 flex items-center justify-center px-1 font-bold">
+          <span className="absolute -top-1 -right-1 bg-fire-5000 text-white text-xs rounded-full min-w-[20px] h-5 flex items-center justify-center px-1 font-bold">
             {noLeidos > 9 ? '9+' : noLeidos}
           </span>
         )}
@@ -99,7 +99,7 @@ export function ChatWidget() {
           className="input flex-1 text-sm py-1.5 resize-none leading-snug"
           placeholder="Mensaje…"
           value={texto}
-          maxLength={500}
+          maxLength={5000}
           rows={1}
           style={{ maxHeight: '6rem', minHeight: '2.2rem' }}
           onChange={(e) => {
