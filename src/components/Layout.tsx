@@ -40,6 +40,7 @@ export function Layout() {
               <NavLink to="/clasificacion" className={linkClass}>Clasificación</NavLink>
               <NavLink to="/ranking" className={linkClass}>Ranking</NavLink>
               <NavLink to="/comunidad" className={linkClass}>Comunidad</NavLink>
+              <NavLink to="/chat" className={linkClass}>💬 Chat</NavLink>
               {isAdmin && <NavLink to="/admin" className={linkClass}>Admin</NavLink>}
             </nav>
 
@@ -63,6 +64,7 @@ export function Layout() {
             <NavLink to="/clasificacion" className={linkClass}>Clasificación</NavLink>
             <NavLink to="/ranking" className={linkClass}>Ranking</NavLink>
             <NavLink to="/comunidad" className={linkClass}>Comunidad</NavLink>
+              <NavLink to="/chat" className={linkClass}>💬 Chat</NavLink>
             {isAdmin && <NavLink to="/admin" className={linkClass}>Admin</NavLink>}
           </nav>
         </div>
