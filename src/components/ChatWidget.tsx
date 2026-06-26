@@ -64,7 +64,7 @@ export function ChatWidget() {
             <div key={m.id} className={`flex ${propio ? 'justify-end' : 'justify-start'}`}>
               <div className={`max-w-[80%] rounded-2xl px-3 py-2 ${propio ? 'bg-pitch-600 text-white' : 'bg-pitch-50 text-ink-900'}`}>
                 {!propio && <div className="text-[11px] font-semibold text-pitch-700 mb-0.5">{m.nombre}</div>}
-                {m.texto && <div className="text-sm break-words whitespace-pre-wrap">{m.texto}</div>}
+                {m.texto && <div className="text-sm whitespace-pre-wrap" style={{ overflowWrap: 'anywhere', wordBreak: 'break-word' }}>{m.texto}</div>}
                 {m.sticker && <div className="text-4xl leading-tight">{m.sticker}</div>}
                 <div className={`text-[9px] mt-0.5 flex items-center gap-2 ${propio ? 'text-pitch-100' : 'text-ink-700/60'}`}>
                   <span>{fmtHora(m.created_at)}</span>
@@ -91,19 +91,26 @@ export function ChatWidget() {
       )}
 
       {/* Barra de envío */}
-      <div className="border-t border-pitch-100 p-2 flex items-center gap-1">
-        <button onClick={() => setMostrarStickers(v => !v)} className="text-xl px-1 hover:bg-pitch-50 rounded" title="Stickers">
+      <div className="border-t border-pitch-100 p-2 flex items-end gap-1">
+        <button onClick={() => setMostrarStickers(v => !v)} className="text-xl px-1 hover:bg-pitch-50 rounded shrink-0 self-center" title="Stickers">
           😀
         </button>
-        <input
-          className="input flex-1 text-sm py-1.5"
+        <textarea
+          className="input flex-1 text-sm py-1.5 resize-none leading-snug"
           placeholder="Mensaje…"
           value={texto}
           maxLength={500}
-          onChange={(e) => setTexto(e.target.value)}
+          rows={1}
+          style={{ maxHeight: '6rem', minHeight: '2.2rem' }}
+          onChange={(e) => {
+            setTexto(e.target.value);
+            // crecer con el contenido
+            e.target.style.height = 'auto';
+            e.target.style.height = Math.min(e.target.scrollHeight, 96) + 'px';
+          }}
           onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleEnviar(); } }}
         />
-        <button onClick={() => handleEnviar()} className="btn-accent px-3 py-1.5 text-sm" disabled={!texto.trim()}>
+        <button onClick={() => handleEnviar()} className="btn-accent px-3 py-1.5 text-sm shrink-0 self-center" disabled={!texto.trim()}>
           ➤
         </button>
       </div>
