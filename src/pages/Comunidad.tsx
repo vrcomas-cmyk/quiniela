@@ -4,6 +4,7 @@ import { Fase, Partido, Profile, PronosticoPartido } from '../types';
 import { fmtFechaCorta, estaCerrado } from '../lib/fechas';
 import { Bandera } from '../lib/banderas';
 import { nombresCortos } from '../lib/nombresCortos';
+import { faseCorrienteId } from '../lib/faseActual';
 
 interface CelaCell {
   goles_local: number;
@@ -24,27 +25,39 @@ export function Comunidad() {
       const { data } = await supabase.from('fases').select('*').order('orden');
       const arr = (data ?? []) as Fase[];
       setFases(arr);
-      setFaseSel(arr[0]?.id ?? null);
+
+      // Arrancar en la fase corriente (según partidos), no siempre en grupos.
+      const { data: todosP } = await supabase
+        .from('partidos').select('id, fase_id, cierre_pronostico, fecha_partido');
+      const corriente = faseCorrienteId(
+        arr.map(f => ({ id: f.id, orden: f.orden, fecha_cierre: f.fecha_cierre })),
+        (todosP ?? []) as any[]
+      );
+      setFaseSel(corriente ?? arr[0]?.id ?? null);
       setLoading(false);
     })();
   }, []);
 
   useEffect(() => {
     if (!faseSel) return;
+    let cancelado = false;            // se activa si cambia la fase antes de terminar
+    const faseDeEstaCarga = faseSel;  // fase para la que estamos cargando
+
     (async () => {
       setLoading(true);
       const { data: pData } = await supabase
-        .from('partidos').select('*').eq('fase_id', faseSel).order('fecha_partido', { nullsFirst: false }).order('numero');
+        .from('partidos').select('*').eq('fase_id', faseDeEstaCarga).order('fecha_partido', { nullsFirst: false }).order('numero');
+      if (cancelado || faseDeEstaCarga !== faseSel) return; // respuesta obsoleta: descartar
       const partidosArr = (pData ?? []) as Partido[];
       setPartidos(partidosArr);
 
       const ids = partidosArr.map(p => p.id);
       if (ids.length === 0) {
-        setMatriz({}); setJugadores([]); setLoading(false); return;
+        if (!cancelado) { setMatriz({}); setJugadores([]); setLoading(false); }
+        return;
       }
 
       // Traer TODOS los pronósticos en bloques de 1000 (Supabase corta a 1000 por consulta).
-      // Una fase de grupos tiene 72 partidos x ~100 jugadores = 7000+ filas.
       const pronosData: any[] = [];
       const TAM = 1000;
       let desde = 0;
@@ -54,6 +67,7 @@ export function Comunidad() {
           .select('user_id, partido_id, goles_local, goles_visitante, puntos_obtenidos')
           .in('partido_id', ids)
           .range(desde, desde + TAM - 1);
+        if (cancelado || faseDeEstaCarga !== faseSel) return; // descartar si ya cambió la fase
         if (error) break;
         const arr = bloque ?? [];
         pronosData.push(...arr);
@@ -61,10 +75,10 @@ export function Comunidad() {
         desde += TAM;
       }
 
-      // Cargar TODOS los jugadores desde profiles (no deducirlos de los pronósticos),
-      // para que todas las columnas aparezcan aunque a alguien le falte un pronóstico.
       const { data: profData } = await supabase
         .from('profiles').select('*').eq('rol', 'jugador');
+      if (cancelado || faseDeEstaCarga !== faseSel) return; // descartar obsoleto
+
       setJugadores(((profData ?? []) as Profile[]).sort((a, b) =>
         a.nombre_completo.localeCompare(b.nombre_completo)
       ));
@@ -78,9 +92,13 @@ export function Comunidad() {
           puntos: p.puntos_obtenidos,
         };
       });
+      if (cancelado || faseDeEstaCarga !== faseSel) return; // último check antes de pintar
       setMatriz(mat);
       setLoading(false);
     })();
+
+    // Al cambiar de fase (o desmontar), cancelar esta carga para que no pise la nueva
+    return () => { cancelado = true; };
   }, [faseSel]);
 
   const fase = fases.find(f => f.id === faseSel);
@@ -139,8 +157,17 @@ export function Comunidad() {
             </thead>
             <tbody>
               {partidos.map(p => {
+                // El RLS solo devuelve pronósticos de partidos ya cerrados. Por eso,
+                // si para este partido llegó AL MENOS un pronóstico, está cerrado y
+                // mostramos los datos. Si no llegó ninguno, lo tratamos como abierto
+                // (candado), salvo que ya tenga resultado oficial (entonces cerrado).
+                // Un partido está cerrado si su cierre (individual o de fase) ya pasó,
+                // o si ya tiene resultado oficial. NO usamos la presencia de datos,
+                // porque cada usuario ve SIEMPRE sus propios pronósticos (aunque el
+                // partido siga abierto), y eso revelaría su pronóstico antes de tiempo.
+                const tieneOficial = p.goles_local_oficial !== null && p.goles_visitante_oficial !== null;
                 const cierreP = p.cierre_pronostico ?? fase?.fecha_cierre ?? null;
-                const cerrado = estaCerrado(cierreP);
+                const cerrado = estaCerrado(cierreP) || tieneOficial;
                 return (
                   <tr key={p.id}>
                     <td className="px-3 py-2 sticky left-0 z-10 bg-white border-t border-pitch-100" style={{ minWidth: 150 }}>
@@ -149,7 +176,7 @@ export function Comunidad() {
                     </td>
                     <td className="px-2 py-2 text-center font-mono sticky z-10 bg-white border-t border-pitch-100"
                         style={{ left: 150, minWidth: 60 }}>
-                      {p.goles_local_oficial !== null && p.goles_visitante_oficial !== null
+                      {tieneOficial
                         ? `${p.goles_local_oficial}–${p.goles_visitante_oficial}`
                         : '—'}
                     </td>

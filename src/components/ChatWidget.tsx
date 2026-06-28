@@ -170,7 +170,7 @@ export function ChatWidget() {
           className="input flex-1 text-sm py-1.5 resize-none leading-snug"
           placeholder="Mensaje…"
           value={texto}
-          maxLength={500}
+          maxLength={5000}
           rows={1}
           style={{ maxHeight: '6rem', minHeight: '2.2rem' }}
           onChange={(e) => {
