@@ -7,6 +7,7 @@ import { Markdown } from '../components/Markdown';
 import { useAuthCtx } from '../hooks/AuthContext';
 import { useConfig } from '../hooks/useConfig';
 import { fmtFecha, estaAbierto, estaCerrado, antesDeAbrir } from '../lib/fechas';
+import { Bandera } from '../lib/banderas';
 
 export function Home() {
   const { profile } = useAuthCtx();
@@ -17,12 +18,28 @@ export function Home() {
   const [misPuntos, setMisPuntos] = useState<number | null>(null);
   const [miPosicion, setMiPosicion] = useState<number | null>(null);
   const [totalJugadores, setTotalJugadores] = useState(0);
+  const [siguientePartido, setSiguientePartido] = useState<any>(null);
 
   useEffect(() => {
     (async () => {
       const { data: fasesData } = await supabase
         .from('fases').select('*').order('orden');
       setFases((fasesData ?? []) as Fase[]);
+
+      // Siguiente partido cuyo pronóstico aún NO cierra (el cierre más próximo en el futuro).
+      // Usa cierre_pronostico del partido; si no tiene, usa el de su fase.
+      const ahora = new Date().toISOString();
+      const { data: prox } = await supabase
+        .from('partidos')
+        .select('*, fases!inner(nombre, fecha_cierre)')
+        .order('fecha_partido', { ascending: true });
+      if (prox) {
+        const candidato = (prox as any[])
+          .map(p => ({ ...p, cierreEf: p.cierre_pronostico ?? p.fases?.fecha_cierre ?? null }))
+          .filter(p => p.cierreEf && p.cierreEf > ahora)
+          .sort((a, b) => (a.cierreEf < b.cierreEf ? -1 : 1))[0];
+        setSiguientePartido(candidato ?? null);
+      }
 
       const { data: ranking } = await supabase
         .from('ranking').select('user_id, puntos_totales');
@@ -67,6 +84,28 @@ export function Home() {
           </div>
         </div>
       </div>
+
+      {siguientePartido && (
+        <Link to="/pronosticos" className="block">
+          <div className="card p-4 border-2 border-fire-400 bg-fire-50/50 hover:bg-fire-50 transition">
+            <div className="text-xs uppercase tracking-widest text-fire-600 font-semibold mb-1">
+              ⏰ Próximo cierre de pronóstico
+            </div>
+            <div className="font-display text-lg text-ink-900">
+              <Bandera equipo={siguientePartido.equipo_local} /> {siguientePartido.equipo_local}
+              {' vs '}
+              <Bandera equipo={siguientePartido.equipo_visitante} /> {siguientePartido.equipo_visitante}
+            </div>
+            <div className="text-sm mt-1">
+              <Countdown fechaCierre={siguientePartido.cierreEf} />
+            </div>
+            <div className="text-[11px] text-ink-700/70 mt-1">
+              {fmtFecha(siguientePartido.fecha_partido)}
+              {siguientePartido.sede ? ` · ${siguientePartido.sede}` : ''} · Toca para pronosticar ›
+            </div>
+          </div>
+        </Link>
+      )}
 
       <div>
         <h3 className="font-display text-2xl text-ink-900 mb-3">FASES DEL TORNEO</h3>

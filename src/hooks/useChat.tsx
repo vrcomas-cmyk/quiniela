@@ -18,6 +18,7 @@ export function useChat() {
   const isAdmin = profile?.rol === 'admin';
   const ultimoVistoRef = useRef<number>(Date.now());
   const [noLeidos, setNoLeidos] = useState(0);
+  const [ultimoEntrante, setUltimoEntrante] = useState<Mensaje | null>(null);
 
   useEffect(() => {
     let canal: ReturnType<typeof supabase.channel> | null = null;
@@ -36,8 +37,11 @@ export function useChat() {
           (payload) => {
             const nuevo = payload.new as Mensaje;
             setMensajes((prev) => prev.some(m => m.id === nuevo.id) ? prev : [...prev, nuevo]);
-            // contar no leídos si no es propio
-            setNoLeidos((n) => (nuevo.user_id !== user?.id ? n + 1 : n));
+            // si no es propio: contar no leído y marcar como entrante (para preview/sonido)
+            if (nuevo.user_id !== user?.id) {
+              setNoLeidos((n) => n + 1);
+              setUltimoEntrante(nuevo);
+            }
           })
         .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'mensajes_chat' },
           (payload) => {
@@ -69,7 +73,7 @@ export function useChat() {
 
   const marcarLeidos = () => { setNoLeidos(0); ultimoVistoRef.current = Date.now(); };
 
-  return { mensajes, loading, isAdmin, user, enviar, borrar, noLeidos, marcarLeidos };
+  return { mensajes, loading, isAdmin, user, enviar, borrar, noLeidos, marcarLeidos, ultimoEntrante };
 }
 
 export const STICKERS = [
