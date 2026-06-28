@@ -277,6 +277,11 @@ export function MisPronosticos() {
                 Exacto: <b>{faseActual.pts_marcador_exacto} pts</b> ·
                 Acierto resultado: <b>{faseActual.pts_acierto_resultado} pts</b>
               </div>
+              {faseActual.codigo !== 'grupos' && (
+                <div className="text-[11px] text-fire-300 mt-1">
+                  ⚠️ El marcador se toma hasta el tiempo extra. Los penales NO cuentan.
+                </div>
+              )}
               {partidos.length > 0 && (
                 <div className="mt-2">
                   <div className="text-xs text-pitch-100 mb-1">
@@ -347,7 +352,7 @@ export function MisPronosticos() {
         </div>
       )}
 
-      {!faseCerrada && !faseNoAbierta && partidos.length > 0 && (
+      {hayAlgoAbierto && partidos.length > 0 && (
         <>
           {/* Descripción del funcionamiento del autoguardado */}
           <div className="card p-3 bg-pitch-50 border border-pitch-200">
@@ -368,11 +373,11 @@ export function MisPronosticos() {
           </div>
 
           {/* Estado y botón de validación */}
-          <div className="flex flex-wrap justify-between items-center gap-2 text-sm">
+          <div className="flex flex-col sm:flex-row sm:flex-wrap sm:justify-between sm:items-center gap-2 text-sm">
             <span className="text-ink-700">
               Guardados <b>{guardadosCompletos}</b> de <b>{partidos.length}</b> partidos
             </span>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-col sm:flex-row sm:items-center gap-2">
               {Object.values(estadoGuardado).includes('guardando') ? (
                 <span className="text-pitch-700 flex items-center gap-1">
                   <span className="animate-spin">⏳</span> Guardando…
@@ -394,7 +399,7 @@ export function MisPronosticos() {
                     }
                   }, 400);
                 }}
-                className="btn-accent text-sm"
+                className="btn-accent text-sm w-full sm:w-auto"
               >
                 Confirmar y validar guardado
               </button>

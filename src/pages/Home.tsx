@@ -145,6 +145,11 @@ export function Home() {
                   <div>Marcador exacto: <b>{f.pts_marcador_exacto} pts</b></div>
                   <div>Acierto resultado: <b>{f.pts_acierto_resultado} pts</b></div>
                 </div>
+                {f.codigo !== 'grupos' && (
+                  <div className="text-[11px] text-fire-600 font-semibold">
+                    ⚠️ Marcador hasta tiempo extra · penales NO cuentan
+                  </div>
+                )}
                 {ultCierre && (
                   <div className="text-xs text-ink-700">
                     Último cierre: {fmtFecha(ultCierre)}
