@@ -246,6 +246,14 @@ export function MisPronosticos() {
 
   return (
     <div className="space-y-4">
+      {hayPendientes && (
+        <div className="sticky top-2 z-30 bg-amber-500 text-white rounded-lg shadow-lg px-4 py-2 flex items-center gap-2 animate-pulse">
+          <span className="text-lg">⚠️</span>
+          <span className="font-bold text-sm">
+            Tienes cambios sin guardar. Toca el botón 💾 GUARDAR del partido para conservarlos.
+          </span>
+        </div>
+      )}
       <div className="card p-4">
         <label className="label">Selecciona la fase</label>
         <div className="flex flex-wrap gap-2">
@@ -452,36 +460,47 @@ export function MisPronosticos() {
 
     const estado = estadoGuardado[p.id];
 
+    // ¿Hay cambios escritos que NO coinciden con lo guardado? (pendiente de guardar)
+    const glActual = e.local === '' ? null : parseInt(e.local, 10);
+    const gvActual = e.visit === '' ? null : parseInt(e.visit, 10);
+    const yaGl = p.pronostico?.goles_local ?? null;
+    const yaGv = p.pronostico?.goles_visitante ?? null;
+    const ambosLlenos = e.local !== '' && e.visit !== '';
+    const cambioSinGuardar = enEdicion && ambosLlenos && (glActual !== yaGl || gvActual !== yaGv);
+
     // Maneja salida de un input: autoguarda; si quedó completo, salta al siguiente
-    const onBlurInput = async () => {
-      // pequeño delay para permitir que el foco pase al otro input del mismo partido
+    const onBlurInput = (ev: React.FocusEvent<HTMLInputElement>) => {
+      // Si el foco pasó al OTRO campo del mismo partido, no hacer nada todavía.
+      const haciaDonde = ev.relatedTarget as HTMLElement | null;
+      const sigueEnPartido = haciaDonde?.getAttribute?.('data-partido') === p.id;
+      if (sigueEnPartido) return;
+
+      // El foco salió del partido: guardar lo que haya y cerrar la edición.
       setTimeout(async () => {
-        const ed = edits[p.id];
+        const ed = editsRef.current[p.id];
         if (!ed) return;
         const ok = await autoguardar(p.id);
-        // si ambos completos, cerrar edición y saltar al siguiente
-        if (ed.local !== '' && ed.visit !== '') {
-          if (ok || guardadoCompleto) {
-            setEditando(s => ({ ...s, [p.id]: false }));
-          }
+        if (ed.local !== '' && ed.visit !== '' && (ok || guardadoCompleto)) {
+          setEditando(s => ({ ...s, [p.id]: false }));
         }
-      }, 120);
+      }, 60);
     };
 
     const onChangeMarcador = (campo: 'local' | 'visit', val: string) => {
       setEdits(s => {
         const nuevo = { ...s, [p.id]: { ...s[p.id], [campo]: val } };
         editsRef.current = nuevo; // mantener el ref fresco de inmediato
-        // Si con este cambio ambos quedan completos, autoguardar + saltar al siguiente
-        const ed = nuevo[p.id];
-        if (ed.local !== '' && ed.visit !== '') {
-          setTimeout(async () => {
-            const ok = await autoguardar(p.id);
-            if (ok) {
-              setEditando(s2 => ({ ...s2, [p.id]: false }));
-              irSiguiente(p.id);
-            }
-          }, 50);
+        // El salto automático al siguiente SOLO aplica cuando se está llenando por
+        // primera vez (no en modo edición de un partido ya guardado). En edición,
+        // el usuario controla cuándo termina (sale del campo o pulsa Listo).
+        if (!enEdicion && !guardadoCompleto) {
+          const ed = nuevo[p.id];
+          if (ed.local !== '' && ed.visit !== '') {
+            setTimeout(async () => {
+              const ok = await autoguardar(p.id);
+              if (ok) irSiguiente(p.id);
+            }, 50);
+          }
         }
         return nuevo;
       });
@@ -489,7 +508,8 @@ export function MisPronosticos() {
 
     return (
       <div key={p.id} className={`grid grid-cols-12 gap-2 items-center py-2 border-b border-pitch-100 last:border-0 rounded-lg px-2 transition ${
-        guardadoCompleto && !enEdicion ? 'bg-green-50 border-l-4 border-l-green-500' : ''
+        cambioSinGuardar ? 'bg-amber-50 border-l-4 border-l-amber-500 ring-1 ring-amber-300'
+        : guardadoCompleto && !enEdicion ? 'bg-green-50 border-l-4 border-l-green-500' : ''
       }`}>
         <div className="col-span-12 sm:col-span-2 text-xs text-ink-700">
           {p.numero && <span className="font-mono mr-2">#{p.numero}</span>}
@@ -512,6 +532,7 @@ export function MisPronosticos() {
         <div className="col-span-2 sm:col-span-3 flex items-center justify-center gap-1">
           <input
             type="number" min={0} max={20}
+            data-partido={p.id}
             ref={(el) => { inputsRef.current[p.id] = el; }}
             className="input w-12 text-center px-1 py-1"
             value={noHaAbierto ? '' : e.local}
@@ -523,6 +544,7 @@ export function MisPronosticos() {
           <span className="text-ink-700">–</span>
           <input
             type="number" min={0} max={20}
+            data-partido={p.id}
             className="input w-12 text-center px-1 py-1"
             value={noHaAbierto ? '' : e.visit}
             disabled={inputsDisabled}
@@ -565,6 +587,29 @@ export function MisPronosticos() {
             >
               ✏️ Editar
             </button>
+          )}
+          {/* Botón Listo: mientras se edita, para guardar y cerrar explícitamente */}
+          {enEdicion && !pCerrado && (
+            <div className="flex flex-col items-end gap-1">
+              {cambioSinGuardar && (
+                <span className="text-[11px] text-amber-700 font-bold animate-pulse">
+                  ⚠️ ¡Toca GUARDAR para no perder el cambio!
+                </span>
+              )}
+              <button
+                onClick={async () => {
+                  await autoguardar(p.id);
+                  setEditando(s => ({ ...s, [p.id]: false }));
+                }}
+                className={`text-xs px-3 py-1.5 rounded font-bold text-white ${
+                  cambioSinGuardar
+                    ? 'bg-amber-500 hover:bg-amber-600 animate-pulse shadow-lg'
+                    : 'bg-green-600 hover:bg-green-700'
+                }`}
+              >
+                {cambioSinGuardar ? '💾 GUARDAR' : '✓ Listo'}
+              </button>
+            </div>
           )}
           {guardadoCompleto && !enEdicion && (
             <span className="badge bg-green-500 text-white font-semibold">✓ Guardado</span>
