@@ -124,24 +124,26 @@ export function MisPronosticos() {
     return m;
   }, [partidos]);
 
-  // Guarda lo que haya de un partido (incluso incompleto). Silencioso.
+  // Guarda un partido solo si AMBOS marcadores están llenos. Silencioso.
   const autoguardar = async (partidoId: string): Promise<boolean> => {
     const e = editsRef.current[partidoId];
     if (!e) return false;
-    // Si ambos vacíos, no hay nada que guardar
-    if (e.local === '' && e.visit === '') return false;
+    // Solo guardar cuando AMBOS marcadores estén llenos (la base exige ambos).
+    // Si está incompleto, no guarda todavía (no es error, solo espera).
+    if (e.local === '' || e.visit === '') return false;
 
     const p = partidos.find(x => x.id === partidoId);
     if (!p) return false;
     // Respetar cierre y permiso de edición
     const cierreP = p.cierre_pronostico ?? faseActual?.fecha_cierre ?? null;
     const puedeExtra = profile?.puede_editar === true;
-    if (!puedeExtra && (antesDeAbrir(faseActual?.fecha_apertura ?? null) || estaCerrado(cierreP))) return false;
+    const noAbreFase = !!faseActual?.fecha_apertura && antesDeAbrir(faseActual.fecha_apertura);
+    if (!puedeExtra && (noAbreFase || estaCerrado(cierreP))) return false;
 
-    // Parsear: lo vacío se guarda como null (incompleto permitido)
-    const gl = e.local === '' ? null : parseInt(e.local, 10);
-    const gv = e.visit === '' ? null : parseInt(e.visit, 10);
-    if ((gl !== null && (isNaN(gl) || gl < 0)) || (gv !== null && (isNaN(gv) || gv < 0))) return false;
+    // Ambos ya tienen valor (validado arriba). Parsear a entero.
+    const gl = parseInt(e.local, 10);
+    const gv = parseInt(e.visit, 10);
+    if (isNaN(gl) || isNaN(gv) || gl < 0 || gv < 0) return false;
 
     // ¿Cambió respecto a lo guardado? Evita escrituras innecesarias
     const yaGl = p.pronostico?.goles_local ?? null;
@@ -190,7 +192,23 @@ export function MisPronosticos() {
 
   const cierreEfectivoFase = faseActual?.fecha_cierre ?? null;
   const faseCerrada = estaCerrado(cierreEfectivoFase);
-  const faseNoAbierta = antesDeAbrir(faseActual?.fecha_apertura ?? null);
+  // Solo se considera "no abierta" si HAY fecha de apertura y aún no llega.
+  // Si la fase no define apertura (se maneja por partido), no bloquea.
+  const faseNoAbierta = !!faseActual?.fecha_apertura && antesDeAbrir(faseActual.fecha_apertura);
+
+  // Estado REAL basado en partidos: cuántos tienen su pronóstico aún abierto.
+  // (Usa el cierre por partido; si el partido no tiene, cae al de la fase.)
+  const partidosAbiertos = partidos.filter(p => {
+    if (!!faseActual?.fecha_apertura && antesDeAbrir(faseActual.fecha_apertura)) return false;
+    const cierreP = p.cierre_pronostico ?? faseActual?.fecha_cierre ?? null;
+    return !estaCerrado(cierreP);
+  }).length;
+  const hayAlgoAbierto = partidosAbiertos > 0;
+  // Próximo cierre entre los partidos abiertos (para el countdown de la fase)
+  const proximoCierre = partidos
+    .map(p => p.cierre_pronostico ?? faseActual?.fecha_cierre ?? null)
+    .filter((c): c is string => !!c && !estaCerrado(c))
+    .sort()[0] ?? null;
 
   return (
     <div className="space-y-4">
@@ -249,13 +267,21 @@ export function MisPronosticos() {
                   </div>
                 </div>
               )}
-              {!faseNoAbierta && !faseActual.fecha_cierre && (
-                <span className="badge-pending">No abierta</span>
+              {/* Si la fase ya abrió, el estado depende de los partidos */}
+              {!faseNoAbierta && hayAlgoAbierto && (
+                <div className="text-right">
+                  <span className="badge bg-green-100 text-green-700 font-semibold">ABIERTA</span>
+                  <div className="text-[11px] text-pitch-100 mt-1">
+                    {partidosAbiertos} de {partidos.length} partido(s) abiertos
+                  </div>
+                  {proximoCierre && (
+                    <div className="mt-1">
+                      <Countdown fechaCierre={proximoCierre} prefix="Próx. cierre" />
+                    </div>
+                  )}
+                </div>
               )}
-              {!faseNoAbierta && faseActual.fecha_cierre && !faseCerrada && (
-                <Countdown fechaCierre={faseActual.fecha_cierre} />
-              )}
-              {!faseNoAbierta && faseCerrada && faseActual.fecha_cierre && (
+              {!faseNoAbierta && !hayAlgoAbierto && partidos.length > 0 && (
                 <span className="badge-closed">CERRADA</span>
               )}
             </div>
@@ -323,7 +349,7 @@ export function MisPronosticos() {
 
   function renderPartido(p: PartidoConPronostico) {
     const cierreP = p.cierre_pronostico ?? faseActual?.fecha_cierre ?? null;
-    const noHaAbierto = antesDeAbrir(faseActual?.fecha_apertura ?? null);
+    const noHaAbierto = !!faseActual?.fecha_apertura && antesDeAbrir(faseActual.fecha_apertura);
     const puedeExtra = profile?.puede_editar === true;
     // Bloqueado por tiempo (salvo permiso extra)
     const bloqueadoPorTiempo = noHaAbierto || estaCerrado(cierreP);
