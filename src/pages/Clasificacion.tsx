@@ -4,6 +4,7 @@ import { Fase, Grupo, PronosticoClasificacion } from '../types';
 import { useAuthCtx } from '../hooks/AuthContext';
 import { Countdown } from '../components/Countdown';
 import { estaCerrado, antesDeAbrir } from '../lib/fechas';
+import { Bandera } from '../lib/banderas';
 
 
 const POSICIONES_FINALES = ['Campeón', 'Subcampeón', '3er Lugar', '4to Lugar'];
@@ -21,6 +22,8 @@ export function Clasificacion() {
   const [clasifGrupo, setClasifGrupo] = useState<Record<string, { p1: string; p2: string }>>({});
   const [terceros, setTerceros] = useState<string[]>(new Array(8).fill(''));
   const [top4, setTop4] = useState<string[]>(new Array(4).fill(''));
+  const [resultados, setResultados] = useState<any[]>([]);
+  const [bonus, setBonus] = useState<number>(0);
 
   const cargar = async () => {
     setLoading(true);
@@ -67,6 +70,15 @@ export function Clasificacion() {
         if (x) t4[i] = x.equipo;
       });
       setTop4(t4);
+
+      // Resultados oficiales (lo que realmente pasó) — para mostrar comparación y puntos
+      const { data: resData } = await supabase.from('resultados_clasificacion').select('*');
+      setResultados(resData ?? []);
+
+      // Bonus de 4 finalistas exactos (si lo ganó)
+      const { data: bonusData } = await supabase
+        .from('bonus_otorgados').select('puntos').eq('user_id', user.id);
+      setBonus((bonusData ?? []).reduce((s: number, b: any) => s + (b.puntos ?? 0), 0));
     }
     setLoading(false);
   };
@@ -133,6 +145,35 @@ export function Clasificacion() {
   // "bloqueada" = no se puede editar (ni antes de abrir, ni después de cerrar)
   const cerrada = noAbierta || estaCerrado(faseGrupos?.fecha_cierre ?? null);
 
+  // ¿Ya hay resultados oficiales cargados? Solo entonces mostramos puntos/comparación.
+  const hayResultados = resultados.length > 0;
+
+  // Buscar el equipo oficial para una posición/tipo dado
+  const oficialDe = (tipo: string, grupoId: string | null, posicion: number | null): string | null => {
+    const r = resultados.find(x =>
+      x.tipo === tipo &&
+      (grupoId ? x.grupo_id === grupoId : true) &&
+      (posicion ? x.posicion === posicion : true)
+    );
+    return r?.equipo ?? null;
+  };
+  // Lista de equipos oficiales de un tipo (para terceros)
+  const oficialesTipo = (tipo: string): string[] =>
+    resultados.filter(x => x.tipo === tipo).map(x => x.equipo);
+  // Puntos que el jugador obtuvo en un pronóstico específico
+  const puntosDe = (tipo: string, grupoId: string | null, posicion: number | null, equipo: string): number => {
+    const pr = pronos.find(x =>
+      x.tipo === tipo &&
+      (grupoId ? x.grupo_id === grupoId : true) &&
+      (posicion ? x.posicion === posicion : true) &&
+      x.equipo === equipo
+    );
+    return pr?.puntos_obtenidos ?? 0;
+  };
+
+  // Total de puntos de clasificación del jugador (incluye bonus)
+  const totalClasif = pronos.reduce((s, p) => s + (p.puntos_obtenidos ?? 0), 0) + bonus;
+
   return (
     <div className="space-y-4">
       <div className="card p-4 bg-gradient-to-r from-pitch-700 to-pitch-900 text-white">
@@ -158,6 +199,80 @@ export function Clasificacion() {
           {!noAbierta && cerrada && <span className="badge-closed">CERRADA</span>}
         </div>
       </div>
+
+      {/* RESUMEN DE PUNTOS (solo cuando ya hay resultados oficiales) */}
+      {hayResultados && (
+        <div className="card p-4 border-2 border-fire-400">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="font-display text-xl text-pitch-700">📋 TU CLASIFICACIÓN: RESULTADOS Y PUNTOS</h3>
+            <span className="badge bg-fire-500 text-white text-base font-bold">{totalClasif} pts</span>
+          </div>
+
+          {/* 1° y 2° por grupo */}
+          <div className="space-y-2">
+            <h4 className="font-semibold text-ink-900 text-sm">1° y 2° de cada grupo</h4>
+            {grupos.map(g => {
+              const miP1 = clasifGrupo[g.id]?.p1 ?? '';
+              const miP2 = clasifGrupo[g.id]?.p2 ?? '';
+              if (!miP1 && !miP2) return null;
+              const ofP1 = oficialDe('clasif_grupo', g.id, 1);
+              const ofP2 = oficialDe('clasif_grupo', g.id, 2);
+              const pts1 = puntosDe('clasif_grupo', g.id, 1, miP1);
+              const pts2 = puntosDe('clasif_grupo', g.id, 2, miP2);
+              return (
+                <div key={g.id} className="border border-pitch-100 rounded-lg p-2 text-sm">
+                  <div className="font-semibold text-pitch-700 mb-1">{g.nombre}</div>
+                  <FilaComparacion etiqueta="1°" miEquipo={miP1} oficial={ofP1} puntos={pts1} />
+                  <FilaComparacion etiqueta="2°" miEquipo={miP2} oficial={ofP2} puntos={pts2} />
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Terceros */}
+          {terceros.some(Boolean) && (
+            <div className="mt-3">
+              <h4 className="font-semibold text-ink-900 text-sm mb-1">Tus 8 terceros</h4>
+              <div className="border border-pitch-100 rounded-lg p-2 grid sm:grid-cols-2 gap-x-4 text-sm">
+                {terceros.filter(Boolean).map((eq, i) => {
+                  const acerto = oficialesTipo('tercero').map(x => x.toLowerCase().trim()).includes(eq.toLowerCase().trim());
+                  const pts = puntosDe('tercero', null, null, eq);
+                  return (
+                    <div key={i} className="flex items-center justify-between py-0.5">
+                      <span><Bandera equipo={eq} /> {eq}</span>
+                      {acerto
+                        ? <span className="text-green-600 font-semibold">✓ +{pts}</span>
+                        : <span className="text-gray-400">✗ 0</span>}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Top 4 */}
+          {top4.some(Boolean) && (
+            <div className="mt-3">
+              <h4 className="font-semibold text-ink-900 text-sm mb-1">Tu top 4 final</h4>
+              <div className="border border-pitch-100 rounded-lg p-2 text-sm space-y-1">
+                {['Campeón', 'Subcampeón', '3er lugar', '4° lugar'].map((lbl, i) => {
+                  const mi = top4[i];
+                  if (!mi) return null;
+                  const of = oficialDe('top4', null, i + 1);
+                  const pts = puntosDe('top4', null, i + 1, mi);
+                  return <FilaComparacion key={i} etiqueta={lbl} miEquipo={mi} oficial={of} puntos={pts} />;
+                })}
+                {bonus > 0 && (
+                  <div className="flex items-center justify-between pt-1 border-t border-pitch-100 text-fire-600 font-bold">
+                    <span>🎉 Bono: 4 finalistas exactos</span>
+                    <span>+{bonus}</span>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {msg && (
         <div className={`p-3 rounded-lg text-sm ${
@@ -264,6 +379,34 @@ export function Clasificacion() {
           </button>
         </div>
       )}
+    </div>
+  );
+}
+
+// Fila de comparación: lo que el jugador puso vs el resultado oficial + puntos
+function FilaComparacion({ etiqueta, miEquipo, oficial, puntos }: {
+  etiqueta: string; miEquipo: string; oficial: string | null; puntos: number;
+}) {
+  const acierto = puntos > 0;
+  const exacto = oficial && miEquipo && oficial.toLowerCase().trim() === miEquipo.toLowerCase().trim();
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-1 py-0.5">
+      <div className="flex items-center gap-1 text-xs">
+        <span className="text-ink-700/60 w-16">{etiqueta}:</span>
+        <span className="font-semibold">
+          <Bandera equipo={miEquipo} /> {miEquipo || '—'}
+        </span>
+        {oficial && !exacto && (
+          <span className="text-ink-700/60">
+            (quedó: <Bandera equipo={oficial} /> {oficial})
+          </span>
+        )}
+      </div>
+      {acierto
+        ? <span className={`text-xs font-bold ${exacto ? 'text-green-600' : 'text-amber-600'}`}>
+            {exacto ? '✓ exacto' : '~ acertó'} +{puntos}
+          </span>
+        : <span className="text-xs text-gray-400">✗ 0 pts</span>}
     </div>
   );
 }
