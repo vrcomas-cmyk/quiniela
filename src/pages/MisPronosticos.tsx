@@ -5,6 +5,7 @@ import { useAuthCtx } from '../hooks/AuthContext';
 import { Countdown } from '../components/Countdown';
 import { fmtFechaCorta, estaCerrado, antesDeAbrir } from '../lib/fechas';
 import { Bandera } from '../lib/banderas';
+import { faseCorrienteId, ultimoCierreFase } from '../lib/faseActual';
 
 interface PartidoConPronostico extends Partido {
   pronostico?: PronosticoPartido;
@@ -39,12 +40,18 @@ export function MisPronosticos() {
     setFases(fasesArr);
     setGrupos((gruposRes.data ?? []) as Grupo[]);
 
-    // Seleccionar fase abierta o la siguiente
-    const abierta = fasesArr.find(
-      (f) => f.fecha_apertura && f.fecha_cierre &&
-        new Date(f.fecha_apertura) <= new Date() && new Date(f.fecha_cierre) > new Date()
+    // Para elegir la fase corriente necesitamos los cierres de todos los partidos
+    const { data: todosP } = await supabase
+      .from('partidos')
+      .select('id, fase_id, cierre_pronostico, fecha_partido');
+    const partidosMin = (todosP ?? []) as any[];
+
+    // Fase corriente: la primera con partidos abiertos (según cierre por partido)
+    const corriente = faseCorrienteId(
+      fasesArr.map(f => ({ id: f.id, orden: f.orden, fecha_cierre: f.fecha_cierre })),
+      partidosMin
     );
-    const inicial = faseSel ?? abierta?.id ?? fasesArr[0]?.id;
+    const inicial = faseSel ?? corriente ?? fasesArr[0]?.id;
     setFaseSel(inicial ?? null);
 
     if (inicial) {
@@ -209,6 +216,33 @@ export function MisPronosticos() {
     .map(p => p.cierre_pronostico ?? faseActual?.fecha_cierre ?? null)
     .filter((c): c is string => !!c && !estaCerrado(c))
     .sort()[0] ?? null;
+  // Último cierre de la fase (el más tardío) — "esta fase se cierra del todo en…"
+  const ultimoCierre = faseActual
+    ? ultimoCierreFase(faseActual.id, partidos.map(p => ({
+        id: p.id, fase_id: faseActual.id,
+        cierre_pronostico: p.cierre_pronostico ?? null, fecha_partido: p.fecha_partido ?? null,
+      })), faseActual.fecha_cierre ?? null)
+    : null;
+  const ultimoCierreFuturo = ultimoCierre && !estaCerrado(ultimoCierre) ? ultimoCierre : null;
+
+  // Conteo de guardados: cuántos partidos editables tienen pronóstico completo guardado
+  const partidosEditables = partidos.filter(p => {
+    const cierreP = p.cierre_pronostico ?? faseActual?.fecha_cierre ?? null;
+    return !estaCerrado(cierreP);
+  });
+  const guardadosCompletos = partidos.filter(p =>
+    p.pronostico && p.pronostico.goles_local !== null && p.pronostico.goles_local !== undefined
+    && p.pronostico.goles_visitante !== null && p.pronostico.goles_visitante !== undefined
+  ).length;
+  const totalConPron = partidos.filter(p => p.pronostico).length;
+  // ¿Hay algo escrito sin guardar? (incompleto en edits que no coincide con lo guardado)
+  const hayPendientes = Object.entries(edits).some(([pid, e]) => {
+    if (e.local === '' || e.visit === '') return false; // incompleto no cuenta como pendiente
+    const p = partidos.find(x => x.id === pid);
+    if (!p) return false;
+    const gl = parseInt(e.local, 10), gv = parseInt(e.visit, 10);
+    return (p.pronostico?.goles_local ?? null) !== gl || (p.pronostico?.goles_visitante ?? null) !== gv;
+  });
 
   return (
     <div className="space-y-4">
@@ -279,6 +313,11 @@ export function MisPronosticos() {
                       <Countdown fechaCierre={proximoCierre} prefix="Próx. cierre" />
                     </div>
                   )}
+                  {ultimoCierreFuturo && ultimoCierreFuturo !== proximoCierre && (
+                    <div className="mt-1 text-[11px] text-pitch-100">
+                      <Countdown fechaCierre={ultimoCierreFuturo} prefix="Esta fase cierra del todo en" />
+                    </div>
+                  )}
                 </div>
               )}
               {!faseNoAbierta && !hayAlgoAbierto && partidos.length > 0 && (
@@ -309,18 +348,59 @@ export function MisPronosticos() {
       )}
 
       {!faseCerrada && !faseNoAbierta && partidos.length > 0 && (
-        <div className="flex justify-end items-center gap-2 text-sm">
-          {Object.values(estadoGuardado).includes('guardando') ? (
-            <span className="text-pitch-700 flex items-center gap-1">
-              <span className="animate-spin">⏳</span> Guardando…
+        <>
+          {/* Descripción del funcionamiento del autoguardado */}
+          <div className="card p-3 bg-pitch-50 border border-pitch-200">
+            <div className="text-sm text-ink-900 flex items-start gap-2">
+              <span className="text-lg">💡</span>
+              <div>
+                <p className="font-semibold text-pitch-700">Tus marcadores se guardan solos</p>
+                <p className="text-xs text-ink-700 mt-0.5">
+                  Cuando llenas los <b>dos</b> resultados de un partido, se guarda automáticamente
+                  y bajas al siguiente para seguir llenando. No necesitas botón de guardar.
+                </p>
+                <p className="text-xs text-ink-700 mt-0.5">
+                  Un partido ya guardado aparece <span className="text-green-700 font-semibold">resaltado en verde con la leyenda "Guardado"</span>.
+                  Para cambiarlo, usa el botón <b>✏️ Editar</b> de ese partido.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* Estado y botón de validación */}
+          <div className="flex flex-wrap justify-between items-center gap-2 text-sm">
+            <span className="text-ink-700">
+              Guardados <b>{guardadosCompletos}</b> de <b>{partidos.length}</b> partidos
             </span>
-          ) : (
-            <span className="text-green-700 font-semibold flex items-center gap-1">
-              ✓ Todo guardado
-            </span>
-          )}
-          <span className="text-xs text-ink-700/60">· se guarda solo al pasar al siguiente partido</span>
-        </div>
+            <div className="flex items-center gap-2">
+              {Object.values(estadoGuardado).includes('guardando') ? (
+                <span className="text-pitch-700 flex items-center gap-1">
+                  <span className="animate-spin">⏳</span> Guardando…
+                </span>
+              ) : hayPendientes ? (
+                <span className="text-amber-600 font-semibold">● Hay cambios sin guardar</span>
+              ) : (
+                <span className="text-green-700 font-semibold">✓ Todo guardado</span>
+              )}
+              <button
+                onClick={async () => {
+                  // Forzar guardado de todo lo pendiente y validar
+                  for (const pid of Object.keys(editsRef.current)) { await autoguardar(pid); }
+                  setTimeout(() => {
+                    if (guardadosCompletos >= totalConPron && !hayPendientes) {
+                      setMsg({ tipo: 'ok', texto: `✓ Confirmado: tus ${guardadosCompletos} pronósticos están guardados.` });
+                    } else {
+                      setMsg({ tipo: 'ok', texto: 'Revisado. Los partidos completos quedaron guardados. Los que falten, llénalos cuando quieras.' });
+                    }
+                  }, 400);
+                }}
+                className="btn-accent text-sm"
+              >
+                Confirmar y validar guardado
+              </button>
+            </div>
+          </div>
+        </>
       )}
 
       {/* Listado de partidos agrupados */}
@@ -403,7 +483,9 @@ export function MisPronosticos() {
     };
 
     return (
-      <div key={p.id} className="grid grid-cols-12 gap-2 items-center py-2 border-b border-pitch-100 last:border-0">
+      <div key={p.id} className={`grid grid-cols-12 gap-2 items-center py-2 border-b border-pitch-100 last:border-0 rounded-lg px-2 transition ${
+        guardadoCompleto && !enEdicion ? 'bg-green-50 border-l-4 border-l-green-500' : ''
+      }`}>
         <div className="col-span-12 sm:col-span-2 text-xs text-ink-700">
           {p.numero && <span className="font-mono mr-2">#{p.numero}</span>}
           {fmtFechaCorta(p.fecha_partido)}
@@ -480,7 +562,7 @@ export function MisPronosticos() {
             </button>
           )}
           {guardadoCompleto && !enEdicion && (
-            <span className="badge bg-green-50 text-green-700">✓</span>
+            <span className="badge bg-green-500 text-white font-semibold">✓ Guardado</span>
           )}
 
           {noHaAbierto && !puedeExtra && (

@@ -6,7 +6,8 @@ import { Countdown } from '../components/Countdown';
 import { Markdown } from '../components/Markdown';
 import { useAuthCtx } from '../hooks/AuthContext';
 import { useConfig } from '../hooks/useConfig';
-import { fmtFecha, estaAbierto, estaCerrado, antesDeAbrir } from '../lib/fechas';
+import { fmtFecha, antesDeAbrir } from '../lib/fechas';
+import { faseCorrienteId, faseTieneAbierto, ultimoCierreFase } from '../lib/faseActual';
 import { Bandera } from '../lib/banderas';
 
 export function Home() {
@@ -19,6 +20,7 @@ export function Home() {
   const [miPosicion, setMiPosicion] = useState<number | null>(null);
   const [totalJugadores, setTotalJugadores] = useState(0);
   const [siguientePartido, setSiguientePartido] = useState<any>(null);
+  const [partidosAll, setPartidosAll] = useState<any[]>([]);
 
   useEffect(() => {
     (async () => {
@@ -26,20 +28,21 @@ export function Home() {
         .from('fases').select('*').order('orden');
       setFases((fasesData ?? []) as Fase[]);
 
-      // Siguiente partido cuyo pronóstico aún NO cierra (el cierre más próximo en el futuro).
-      // Usa cierre_pronostico del partido; si no tiene, usa el de su fase.
+      // Traer todos los partidos (para calcular fase corriente y estados por partido)
       const ahora = new Date().toISOString();
       const { data: prox } = await supabase
         .from('partidos')
-        .select('*, fases!inner(nombre, fecha_cierre)')
+        .select('*, fases!inner(nombre, fecha_cierre, orden)')
         .order('fecha_partido', { ascending: true });
-      if (prox) {
-        const candidato = (prox as any[])
-          .map(p => ({ ...p, cierreEf: p.cierre_pronostico ?? p.fases?.fecha_cierre ?? null }))
-          .filter(p => p.cierreEf && p.cierreEf > ahora)
-          .sort((a, b) => (a.cierreEf < b.cierreEf ? -1 : 1))[0];
-        setSiguientePartido(candidato ?? null);
-      }
+      const todos = (prox ?? []) as any[];
+      setPartidosAll(todos);
+
+      // Siguiente partido cuyo pronóstico aún NO cierra (cierre más próximo)
+      const candidato = todos
+        .map(p => ({ ...p, cierreEf: p.cierre_pronostico ?? p.fases?.fecha_cierre ?? null }))
+        .filter(p => p.cierreEf && p.cierreEf > ahora)
+        .sort((a, b) => (a.cierreEf < b.cierreEf ? -1 : 1))[0];
+      setSiguientePartido(candidato ?? null);
 
       const { data: ranking } = await supabase
         .from('ranking').select('user_id, puntos_totales');
@@ -53,6 +56,17 @@ export function Home() {
       }
     })();
   }, [profile]);
+
+  // Fase corriente (según partidos abiertos) y orden con la corriente primero
+  const corrienteId = faseCorrienteId(
+    fases.map(f => ({ id: f.id, orden: f.orden, fecha_cierre: f.fecha_cierre })),
+    partidosAll
+  );
+  const fasesOrdenadas = [...fases].sort((a, b) => {
+    if (a.id === corrienteId) return -1;
+    if (b.id === corrienteId) return 1;
+    return a.orden - b.orden;
+  });
 
   return (
     <div className="space-y-6">
@@ -110,35 +124,40 @@ export function Home() {
       <div>
         <h3 className="font-display text-2xl text-ink-900 mb-3">FASES DEL TORNEO</h3>
         <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {fases.map((f) => {
-            const abierta = estaAbierto(f.fecha_apertura, f.fecha_cierre);
-            const cerrada = estaCerrado(f.fecha_cierre);
+          {fasesOrdenadas.map((f) => {
+            const tieneAbierto = faseTieneAbierto(f.id, partidosAll, f.fecha_cierre ?? null);
+            const tienePartidos = partidosAll.some(p => p.fase_id === f.id);
+            const ultCierre = ultimoCierreFase(f.id, partidosAll, f.fecha_cierre ?? null);
             const futura = antesDeAbrir(f.fecha_apertura);
+            const esCorriente = f.id === corrienteId;
             return (
-              <div key={f.id} className="card p-4 flex flex-col gap-2">
+              <div key={f.id} className={`card p-4 flex flex-col gap-2 ${esCorriente ? 'ring-2 ring-fire-400' : ''}`}>
                 <div className="flex items-center justify-between">
                   <span className="font-display text-lg">{f.nombre}</span>
-                  {abierta && <span className="badge-open">● ABIERTA</span>}
-                  {cerrada && !abierta && <span className="badge-closed">CERRADA</span>}
-                  {futura && <span className="badge-pending">PRÓXIMAMENTE</span>}
+                  {tieneAbierto && <span className="badge-open">● ABIERTA</span>}
+                  {!tieneAbierto && tienePartidos && <span className="badge-closed">CERRADA</span>}
+                  {!tienePartidos && futura && <span className="badge-pending">PRÓXIMAMENTE</span>}
                 </div>
+                {esCorriente && (
+                  <span className="text-[10px] uppercase tracking-widest text-fire-600 font-semibold">Fase actual</span>
+                )}
                 <div className="text-xs text-ink-700">
                   <div>Marcador exacto: <b>{f.pts_marcador_exacto} pts</b></div>
                   <div>Acierto resultado: <b>{f.pts_acierto_resultado} pts</b></div>
                 </div>
-                {f.fecha_cierre && (
+                {ultCierre && (
                   <div className="text-xs text-ink-700">
-                    Cierra: {fmtFecha(f.fecha_cierre)}
+                    Último cierre: {fmtFecha(ultCierre)}
                   </div>
                 )}
-                {abierta && f.fecha_cierre && (
-                  <Countdown fechaCierre={f.fecha_cierre} />
+                {tieneAbierto && ultCierre && (
+                  <Countdown fechaCierre={ultCierre} prefix="La fase cierra en" />
                 )}
                 <Link
                   to="/pronosticos"
-                  className={abierta ? 'btn-accent text-sm mt-1' : 'btn-ghost text-sm mt-1'}
+                  className={tieneAbierto ? 'btn-accent text-sm mt-1' : 'btn-ghost text-sm mt-1'}
                 >
-                  {abierta ? 'Pronosticar' : 'Ver detalles'}
+                  {tieneAbierto ? 'Pronosticar' : 'Ver detalles'}
                 </Link>
               </div>
             );
